@@ -51,7 +51,7 @@ local function main()
 
   local outFile = io.open(opt.output, 'w')
 
-  local sentId = 1
+  local sentId = 0
   local batchId = 1
 
   local predScoreTotal = 0
@@ -66,6 +66,7 @@ local function main()
     timer:reset()
   end
 
+	local sentID = -1
   while true do
     local srcTokens = srcReader:next()
     local goldTokens
@@ -112,7 +113,7 @@ local function main()
             local sentence = translator:buildOutput(results[b].preds[n])
 
             if n == 1 then
-              outFile:write(sentence .. '\n')
+              
               predScoreTotal = predScoreTotal + results[b].preds[n].score
               predWordsTotal = predWordsTotal + #results[b].preds[n].words
 
@@ -123,8 +124,11 @@ local function main()
             end
 
             if #results[b].preds > 1 then
-              _G.logger:info("[%.2f] %s", results[b].preds[n].score, sentence)
+							local sentWithScore = string.format("%i ||| %s ||| %.2f", sentId, sentence, results[b].preds[n].score)
+							outFile:write(sentWithScore .. '\n')
+              _G.logger:info(sentWithScore)
             else
+							outFile:write(sentence .. '\n')
               _G.logger:info("PRED %d: %s", sentId, sentence)
               _G.logger:info("PRED SCORE: %.2f", results[b].preds[n].score)
             end
@@ -132,6 +136,9 @@ local function main()
         end
 
         _G.logger:info('')
+        if #results[b].preds > 1 then
+					outFile:write('\n')
+        end
         sentId = sentId + 1
       end
 
@@ -146,11 +153,12 @@ local function main()
       end
       collectgarbage()
     end
+    
   end
 
   if opt.time then
     local time = timer:time()
-    local sentenceCount = sentId-1
+    local sentenceCount = sentId
     _G.logger:info("Average sentence translation time (in seconds):\n")
     _G.logger:info("avg real\t" .. time.real / sentenceCount .. "\n")
     _G.logger:info("avg user\t" .. time.user / sentenceCount .. "\n")
