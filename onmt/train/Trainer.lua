@@ -53,7 +53,7 @@ local options = {
                                       {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
   {'-report_every',            100,    [[Print stats every this many iterations within an epoch.]],
                                       {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
-  {'-loop_epoch',          1, [[Using the older training code to ensure backward-compatibility. Change this to 0 to use the new training code (save more frequently with bleu)]]},
+  {'-loop_epoch',          0, [[Using the older training code to ensure backward-compatibility. Change this to 0 to use the new training code (save more frequently with bleu)]]},
   {'-async_parallel_minbatch', 1000,  [[For async parallel computing, minimal number of batches before being parallel.]],
                                       {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
   {'-start_iteration',         1,     [[If loading from a checkpoint, the iteration from which to start]],
@@ -142,8 +142,6 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 		
 		while currentEpoch <= self.args.end_epoch do
 		
-				
-				
 				local batchOrderIndex = iter 
 								
 				local batchIdx = batchOrder[batchOrderIndex]
@@ -279,43 +277,42 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
   
 
   _G.logger:info('Start training...')
-
-  for epoch = self.args.start_epoch, self.args.end_epoch do
-    _G.logger:info('')
-    
-    if self.args.loop_epoch == 1 then
-
-			local globalProfiler = onmt.utils.Profiler.new(self.args.profiler)
-
-			globalProfiler:start('train')
-			local epochState, epochProfile = trainEpoch(epoch)
-			globalProfiler:add(epochProfile)
-			globalProfiler:stop('train')
-
-			globalProfiler:start('valid')
-			local validPpl = eval(model, validData)
-			local validBleu = evalBLEU(model, validData)
-		
+  	
+	if self.args.loop_epoch == 1 then
+		for epoch = self.args.start_epoch, self.args.end_epoch do
+			_G.logger:info('')
 			
-			globalProfiler:stop('valid')
-
-			if self.args.profiler then _G.logger:info('profile: %s', globalProfiler:log()) end
-			_G.logger:info('Validation perplexity: %.2f', validPpl)
-			_G.logger:info('Validation BLEU score: %.2f', validBleu)
-
-			optim:updateLearningRate(validPpl, epoch)
-			--~ 
-			local totalEpochs = self.args.end_epoch - self.args.start_epoch + 1
-			--~ 
-			--~ 
-	--~ 
-			checkpoint:saveEpoch(validPpl, validBleu, epochState, true)
 			
-		else
-    
-			trainModel()
-    
-    end
+
+				local globalProfiler = onmt.utils.Profiler.new(self.args.profiler)
+
+				globalProfiler:start('train')
+				local epochState, epochProfile = trainEpoch(epoch)
+				globalProfiler:add(epochProfile)
+				globalProfiler:stop('train')
+
+				globalProfiler:start('valid')
+				local validPpl = eval(model, validData)
+				local validBleu = evalBLEU(model, validData)
+			
+				
+				globalProfiler:stop('valid')
+
+				if self.args.profiler then _G.logger:info('profile: %s', globalProfiler:log()) end
+				_G.logger:info('Validation perplexity: %.2f', validPpl)
+				_G.logger:info('Validation BLEU score: %.2f', validBleu)
+
+				optim:updateLearningRate(validPpl, epoch)
+				--~ 
+				local totalEpochs = self.args.end_epoch - self.args.start_epoch + 1
+				--~ 
+				--~ 
+		--~ 
+				checkpoint:saveEpoch(validPpl, validBleu, epochState, true)
+			
+		end
+  else
+		trainModel()
   end
 end
 
