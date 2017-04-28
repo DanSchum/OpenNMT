@@ -227,4 +227,6 @@ function Factory.buildGenerator(rnnSize, dicts)
   end
 end
 
+
+
 return Factory

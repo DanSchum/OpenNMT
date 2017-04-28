@@ -17,7 +17,7 @@ Parameters:
   * `word_pen` - optional, penalty value to favor longer sentences
 
 --]]
-function DecoderAdvancer:__init(decoders, batch, contexts, max_sent_length, max_num_unks, decStates, dicts, word_pen, ensembleOps)
+function DecoderAdvancer:__init(decoders, batch, contexts, max_sent_length, max_num_unks, decStates, dicts, word_pen,  length_norm, coverage_norm, eos_norm, ensembleOps)
   self.decoders = decoders
   self.batch = batch
   self.contexts = contexts
@@ -27,6 +27,9 @@ function DecoderAdvancer:__init(decoders, batch, contexts, max_sent_length, max_
   self.ensembleOps = ensembleOps or 'sum' -- sum or logsum
   
   self.decStates = {}
+  self.length_norm = length_norm or 0.0
+  self.coverage_norm = coverage_norm or 0.0
+  self.eos_norm = eos_norm or 0.0
   
   -- initialize the decStates, a bit tricky
   for i = 1, self.nModels do
@@ -46,14 +49,22 @@ function DecoderAdvancer:__init(decoders, batch, contexts, max_sent_length, max_
   
 end
 
+function DecoderAdvancer:ensembleAttentionScore(attnScores)
+		
+		local alignment = attnScores[1]
+		
+		for n = 2, #attnScores do
+			alignment:add(attnScores[n])
+		end
+		
+		alignment:div(#attnScores)
+		
+		return alignment
+end
+
 function DecoderAdvancer:ensembleScore(scores)
-	
-	
 	local score = scores[1]	
 	local nOutputs = #score
-	
-	
-	
 	if self.ensembleOps == 'sum' then -- get the average of the probability
 		for n = 1, nOutputs do
 			score[n] = torch.exp(score[n]) -- so we have to exp to get the prob
@@ -93,10 +104,18 @@ function DecoderAdvancer:initBeam()
     end
   end
   local sourceSizes = onmt.utils.Cuda.convert(self.batch.sourceSize)
+  local attnProba = torch.FloatTensor(self.batch.size, self.contexts[1]:size(2))
+    :fill(0.0001)
+    :typeAs(self.contexts[1])
+  -- Mask padding
+  for i = 1,self.batch.size do
+    local pad_size = self.contexts[1]:size(2) - sourceSizes[i]
+    if (pad_size ~= 0) then
+      attnProba[{ i, {1,pad_size} }] = 1.0
+    end
+  end
 
-  -- Define state to be { {decoder states}, {decoder output}, {decoder coverage}, {context},
-  -- {attentions}, features, sourceSizes, step }.
-  local state = { self.decStates, nil, nil, self.contexts, nil, features, sourceSizes, 1 }
+  local state = { self.decStates, nil, nil, self.contexts, nil, features, sourceSizes, 1, attnProba}
   return onmt.translate.Beam.new(tokens, state)
 end
 
@@ -129,27 +148,29 @@ function DecoderAdvancer:update(beam)
   local newStates = {}
   local attnOuts = {}
   for i = 1, self.nModels do
-	self.decoders[i]:maskPadding(sourceSizes, self.batch.sourceLength)
-	
-	local decOut = decOuts and decOuts[i] or nil
-	local decCov = decCovs and decCovs[i] or nil
-	local context = contexts[i]
-	local decState = decStates and decStates[i] or nil
-	
-	-- input is always the same for the decoders
-	decOut, decCov, decState = self.decoders[i]:forwardOne(inputs, decState, context, decOut, decCov)
-	
-	newOuts[i] = decOut
-	newCovs[i] = decCov -- could be nil
-	newStates[i] = decState
-	
-	local softmaxOut = self.decoders[i].softmaxAttn.output
-	attnOuts[i] = softmaxOut
+		self.decoders[i]:maskPadding(sourceSizes, self.batch.sourceLength)
+		
+		local decOut = decOuts and decOuts[i] or nil
+		local decCov = decCovs and decCovs[i] or nil
+		local context = contexts[i]
+		local decState = decStates and decStates[i] or nil
+		
+		-- input is always the same for the decoders
+		decOut, decCov, decState = self.decoders[i]:forwardOne(inputs, decState, context, decOut, decCov)
+		
+		newOuts[i] = decOut
+		newCovs[i] = decCov -- could be nil
+		newStates[i] = decState
+		
+		local softmaxOut = self.decoders[i].softmaxAttn.output
+		attnOuts[i] = softmaxOut
   end
- 
+  
+  local ensembledAttn = self:ensembleAttentionScore(attnOuts)
+	
   
   t = t + 1
-  local nextState = {newStates, newOuts, newCovs, contexts, attnOuts, nil, sourceSizes, t}
+  local nextState = {newStates, newOuts, newCovs, contexts, ensembledAttn, nil, sourceSizes, t}
   beam:setState(nextState)
 end
 

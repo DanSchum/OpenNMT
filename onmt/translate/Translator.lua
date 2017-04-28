@@ -5,6 +5,9 @@ local options = {
   {'-beam_size', 5, [[Beam size]]},
   {'-batch_size', 30, [[Batch size]]},
   {'-word_pen', 0, [[Word Penalty during decoding]]},
+  {'-length_norm', 0.0, [[Length normalization]], valid = onmt.utils.ExtendedCmdLine.isFloat(0)},
+  {'-coverage_norm', 0.0, [[Coverage normalization]], valid = onmt.utils.ExtendedCmdLine.isFloat(0)},
+  {'-eos_norm', 0.0, [[EOS normalization]], valid = onmt.utils.ExtendedCmdLine.isFloat(0)},
   {'-max_sent_length', 250, [[Maximum output sentence length.]]},
   {'-replace_unk', false, [[Replace the generated UNK tokens with the source token that
                           had the highest attention weight. If phrase_table is provided,
@@ -204,7 +207,11 @@ function Translator:translateBatch(batch)
                                                       self.opt.max_sent_length,
                                                       self.opt.max_num_unks,
                                                       encStates,
-                                                      self.dicts, self.opt.word_pen)
+                                                      self.dicts, 
+                                                      self.opt.word_pen,
+                                                      self.opt.length_norm,
+                                                      self.opt.coverage_norm,
+                                                      self.opt.eos_norm)
 
   -- Save memory by only keeping track of necessary elements in the states.
   -- Attentions are at index 4 in the states defined in onmt.translate.DecoderAdvancer.

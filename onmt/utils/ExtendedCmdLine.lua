@@ -355,4 +355,13 @@ function ExtendedCmdLine.fileNullOrExists(v)
   return v == '' or ExtendedCmdLine.fileExists(v)
 end
 
+function ExtendedCmdLine.isFloat(minValue, maxValue)
+  return function(v)
+    return (type(v) == 'number' and
+      (not minValue or v >= minValue) and
+      (not maxValue or v <= maxValue)),
+      buildRangeError('number', minValue, maxValue)
+    end
+end
+
 return ExtendedCmdLine

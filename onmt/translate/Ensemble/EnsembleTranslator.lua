@@ -20,6 +20,9 @@ local options = {
   {'-beam_size', 5, [[Beam size]]},
   {'-batch_size', 30, [[Batch size]]},
   {'-word_pen', 0, [[Word Penalty during decoding]]},
+  {'-length_norm', 0.0, [[Length normalization]], valid = onmt.utils.ExtendedCmdLine.isFloat(0)},
+  {'-coverage_norm', 0.0, [[Coverage normalization]], valid = onmt.utils.ExtendedCmdLine.isFloat(0)},
+  {'-eos_norm', 0.0, [[EOS normalization]], valid = onmt.utils.ExtendedCmdLine.isFloat(0)},
   {'-max_sent_length', 250, [[Maximum output sentence length.]]},
   {'-replace_unk', false, [[Replace the generated UNK tokens with the source token that
                           had the highest attention weight. If phrase_table is provided,
@@ -302,7 +305,7 @@ function Translator:translateBatch(batch)
   local contexts = {}
   
   for i = 1, self.nModels do
-	encStates[i], contexts[i] = self.models[i].encoder:forward(batch)
+		encStates[i], contexts[i] = self.models[i].encoder:forward(batch)
   end
 
   --~ local encStates, context = self.models.encoder:forward(batch)
@@ -320,7 +323,7 @@ function Translator:translateBatch(batch)
   local decoders = {}
   
   for i = 1, self.nModels do
-	table.insert(decoders, self.models[i].decoder)
+		table.insert(decoders, self.models[i].decoder)
   end
 
   -- Specify how to go one step forward.
@@ -331,6 +334,10 @@ function Translator:translateBatch(batch)
                                                       self.opt.max_num_unks,
                                                       encStates,
                                                       self.dicts, self.opt.word_pen,
+                                                      self.opt.word_pen,
+                                                      self.opt.length_norm,
+                                                      self.opt.coverage_norm,
+                                                      self.opt.eos_norm,
                                                       self.ensembleOps)
 
   -- Save memory by only keeping track of necessary elements in the states.
