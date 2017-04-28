@@ -20,7 +20,7 @@ Constructs a unit mapping:
   The full function is  $$\tanh(W_2 [(softmax((W_1 q + b_1) H) H), q] + b_2)$$.
 
 --]]
-local GlobalAttention, parent = torch.class('onmt.GlobalAttention', 'onmt.Network')
+local GlobalDotAttention, parent = torch.class('onmt.GlobalDotAttention', 'onmt.Network')
 
 --[[A nn-style module computing attention.
 
@@ -28,33 +28,21 @@ local GlobalAttention, parent = torch.class('onmt.GlobalAttention', 'onmt.Networ
 
   * `dim` - dimension of the context vectors.
 --]]
-function GlobalAttention:__init(dim)
+function GlobalDotAttention:__init(dim)
   parent.__init(self, self:_buildModel(dim))
 end
 
-function GlobalAttention:_buildModel(dim)
+function GlobalDotAttention:_buildModel(dim)
   local inputs = {}
   table.insert(inputs, nn.Identity()())
   table.insert(inputs, nn.Identity()())
 
-  --~ local targetT = nn.Linear(dim, dim, false)(inputs[1]) -- batchL x dim
-  local ht = inputs[1]
+  local targetT = nn.Linear(dim, dim, false)(inputs[1]) -- batchL x dim
   local context = inputs[2] -- batchL x sourceTimesteps x dim
-  
-  local score_ht_hs
-	local ht2 = nn.Replicate(1,2)(ht) -- batchL x 1 x dim
-	local ht_hs = onmt.JoinReplicateTable(2,3)({ht2, context})
-	local Wa_ht_hs = nn.Bottle(nn.Linear(dim*2, dim, false),2)(ht_hs)
-	local tanh_Wa_ht_hs = nn.Tanh()(Wa_ht_hs)
-	score_ht_hs = nn.Bottle(nn.Linear(dim,1),2)(tanh_Wa_ht_hs)
-	
-	
- 
-
 
   -- Get attention.
-  --~ local attn = nn.MM()({context, nn.Replicate(1,3)(targetT)}) -- batchL x sourceL x 1
-  attn = nn.Sum(3)(score_ht_hs)
+  local attn = nn.MM()({context, nn.Replicate(1,3)(targetT)}) -- batchL x sourceL x 1
+  attn = nn.Sum(3)(attn)
   local softmaxAttn = nn.SoftMax()
   softmaxAttn.name = 'softmaxAttn'
   attn = softmaxAttn(attn)

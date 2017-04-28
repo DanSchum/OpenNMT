@@ -37,12 +37,23 @@ function ContextGateAttention:_buildModel(dim)
   table.insert(inputs, nn.Identity()())
   table.insert(inputs, nn.Identity()())
 
-  local targetT = nn.Linear(dim, dim, false)(inputs[1]) -- batchL x dim
+  local ht = inputs[1]
   local context = inputs[2] -- batchL x sourceTimesteps x dim
   
+  local score_ht_hs
+	local ht2 = nn.Replicate(1,2)(ht) -- batchL x 1 x dim
+	local ht_hs = onmt.JoinReplicateTable(2,3)({ht2, context})
+	local Wa_ht_hs = nn.Bottle(nn.Linear(dim*2, dim, false),2)(ht_hs)
+	local tanh_Wa_ht_hs = nn.Tanh()(Wa_ht_hs)
+	score_ht_hs = nn.Bottle(nn.Linear(dim,1),2)(tanh_Wa_ht_hs)
+	
+	
+ 
+
+
   -- Get attention.
-  local attn = nn.MM()({context, nn.Replicate(1,3)(targetT)}) -- batchL x sourceL x 1
-  attn = nn.Sum(3)(attn)
+  --~ local attn = nn.MM()({context, nn.Replicate(1,3)(targetT)}) -- batchL x sourceL x 1
+  attn = nn.Sum(3)(score_ht_hs)
   local softmaxAttn = nn.SoftMax()
   softmaxAttn.name = 'softmaxAttn'
   attn = softmaxAttn(attn)

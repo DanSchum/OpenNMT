@@ -33,5 +33,6 @@ require('onmt.modules.Utils.SequenceLinear')
 require('onmt.modules.Utils.Replicator')
 require('onmt.modules.Utils.Energy')
 require('onmt.modules.Utils.LayerNormalization')
+require('onmt.modules.JoinReplicateTable')
 
 return onmt
