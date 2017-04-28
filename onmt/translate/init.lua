@@ -6,6 +6,7 @@ translate.BeamSearcher = require('onmt.translate.BeamSearcher')
 translate.DecoderAdvancer = require('onmt.translate.DecoderAdvancer')
 translate.PhraseTable = require('onmt.translate.PhraseTable')
 translate.Translator = require('onmt.translate.Translator')
+translate.Rescorer = require('onmt.translate.Rescorer')
 
 -- for Ensemble
 translate.EnsembleTranslator = require('onmt.translate.Ensemble.EnsembleTranslator')

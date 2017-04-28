@@ -24,11 +24,6 @@ dependencies = {
 build = {
   type = "builtin",
   install = {
-    bin = {
-      onmt_preprocess = "preprocess.lua",
-      onmt_train = "train.lua",
-      onmt_translate = "translate.lua",
-    }
   },
 
   modules = {
@@ -72,6 +67,7 @@ build = {
     ["onmt.translate.DecoderAdvancer"] = "onmt/translate/DecoderAdvancer.lua",
     ["onmt.translate.BeamSearcher"] = "onmt/translate/BeamSearcher.lua",
     ["onmt.translate.Translator"] = "onmt/translate/Translator.lua",
+    ["onmt.translate.Rescorer"] = "onmt/translate/Rescorer.lua",
     ["onmt.translate.PhraseTable"] = "onmt/translate/PhraseTable.lua",
     ["onmt.translate.Ensemble.EnsembleTranslator"] = "onmt/translate/Ensemble/EnsembleTranslator.lua",
     ["onmt.translate.Ensemble.EnsembleDecoderAdvancer"] = "onmt/translate/Ensemble/EnsembleDecoderAdvancer.lua",

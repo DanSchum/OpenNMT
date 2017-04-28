@@ -173,7 +173,7 @@ function DecoderAdvancer:expand(beam)
   --~ local out = self.decoder.generator:forward(decOut)
   local logSoftMaxes = {}
   for i = 1, self.nModels do
-	logSoftMaxes[i] = self.decoders[i].generator:forward(decOuts[i])
+		logSoftMaxes[i] = self.decoders[i].generator:forward(decOuts[i])
   end
   local out = self:ensembleScore(logSoftMaxes) -- average the score 
   

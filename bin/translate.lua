@@ -134,6 +134,9 @@ local function main()
         end
 
         _G.logger:info('')
+        if #results[b].preds > 1 then
+					outFile:write('\n')
+        end
         sentId = sentId + 1
       end
 

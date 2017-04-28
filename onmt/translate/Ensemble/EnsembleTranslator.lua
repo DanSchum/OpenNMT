@@ -30,6 +30,7 @@ local options = {
                         tokens. See README.md for the format this file should be in]]},
   {'-n_best', 1, [[If > 1, it will also output an n_best list of decoded sentences]]},
   {'-save_mem', 1, [[If = 1, it will clear the model states to reduce memory load. However the loading state could be a bit slower.]]},
+  {'-ensemble_ops', 1, [[If = 1, it will clear the model states to reduce memory load. However the loading state could be a bit slower.]]},
   {'-max_num_unks', math.huge, [[All sequences with more unks than this will be ignored
                                during beam search]]},
   {'-pre_filter_factor', 1, [[Optional, set this only if filter is being used. Before
