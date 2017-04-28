@@ -179,6 +179,4 @@ function Optim:getStates()
   return self.optimStates
 end
 
-print " ** Optim modified to reduce learning rate with Adam"
-
 return Optim
