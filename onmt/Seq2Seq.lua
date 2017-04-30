@@ -21,7 +21,7 @@ local options = {
   {'-coverage', 0, [[Coverage vector size. 0 to disable this feature.]],
                      {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
   {'-input_feed', 1, [[Feed the context vector at each time step as additional input (via concatenation with the word embeddings) to the decoder.]],
-                     {enum={0,1}}},
+                     {enum={0,1,2}}},
   {'-residual', false, [[Add residual connections between RNN layers.]]},
   {'-attention', 'global', [[Attention type: global|cgate. Global is the typical one, cgate is global with context gate]]},
   {'-brnn', false, [[Use a bidirectional encoder]]},

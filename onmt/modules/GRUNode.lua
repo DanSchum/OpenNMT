@@ -1,7 +1,8 @@
-local GRU, parent = torch.class('onmt.GRUModule', 'onmt.Network')
+local GRU, parent = torch.class('onmt.GRUNode', 'onmt.Network')
 
 --]]
 function GRU:__init(inputSize, hiddenSize, dropout)
+	dropout = dropout or 0
   parent.__init(self, self:_buildModel(inputSize, hiddenSize, dropout))
 end
 
@@ -20,15 +21,16 @@ function GRU:_buildModel(inputSize, hiddenSize, dropout)
   -- Previous layer input.
   local x = inputs[2]
   
-  function LinearSum(iSize, hSize, x, h)
-	local i2h = nn.Linear(iSize, hSize)(x)
-	local h2h = nn.Linear(hSize, hSize)(h)
-	return nn.CAddTable()({i2h, h2h})
-  end
+  -- compute 2 gates at once to get a little bit faster
+  local i2h = nn.Linear(inputSize, 2 * hiddenSize)(x)
+  local h2h = nn.Linear(hiddenSize, 2 * hiddenSize)(prevH)
+  local allInputSums = nn.CAddTable()({i2h, h2h})
+  local reshaped = nn.Reshape(2, hiddenSize)(allInputSums)
+  local n1, n2 = nn.SplitTable(2)(reshaped):split(2)
+    
+  local uGate = nn.Sigmoid()(n1)
   
-  local uGate = nn.Sigmoid()(LinearSum(inputSize, hiddenSize, x, prevH))
-  
-  local rGate = nn.Sigmoid()(LinearSum(inputSize, hiddenSize, x, prevH))
+  local rGate = nn.Sigmoid()(n2)
   
   local gatedHidden = nn.CMulTable()({rGate, prevH})
   

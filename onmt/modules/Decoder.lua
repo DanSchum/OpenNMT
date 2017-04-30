@@ -33,6 +33,7 @@ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, cove
   self.inputNet = inputNetwork
 
   self.args = {}
+  self.args.inputSize = self.rnn.inputSize
   self.args.rnnSize = self.rnn.outputSize
   self.args.numEffectiveLayers = self.rnn.numEffectiveLayers
 
@@ -92,7 +93,7 @@ function Decoder:serialize()
 end
 
 function Decoder:resetPreallocation()
-  if self.args.inputFeed then
+  if self.args.inputFeed > 0 then
     self.inputFeedProto = torch.Tensor()
   end
   
@@ -153,7 +154,7 @@ function Decoder:_buildModel()
   self.args.inputIndex.context = #inputs
   
   local inputFeed
-  if self.args.inputFeed then
+  if self.args.inputFeed > 0 then
     inputFeed = nn.Identity()() -- batchSize x rnnSize
     table.insert(inputs, inputFeed)
     self.args.inputIndex.inputFeed = #inputs
@@ -161,10 +162,10 @@ function Decoder:_buildModel()
   
   local coverageVector
   if self.args.coverageSize > 0 then
-	_G.logger:info(" * Maintaining context coverage with GRU-based model ")
-	coverageVector = nn.Identity()() -- batchSize x coverageSize
-	table.insert(inputs, coverageVector)
-	self.args.inputIndex.coverage = #inputs
+		_G.logger:info(" * Maintaining context coverage with GRU-based model ")
+		coverageVector = nn.Identity()() -- batchSize x coverageSize
+		table.insert(inputs, coverageVector)
+		self.args.inputIndex.coverage = #inputs
   end
 
   -- Compute the input network.
@@ -173,8 +174,13 @@ function Decoder:_buildModel()
   
   local input = embedding
   -- If set, concatenate previous decoder output.
-  if self.args.inputFeed then
-    input = nn.JoinTable(2)({input, inputFeed})
+  if self.args.inputFeed == 2 then
+    _G.logger:info(" * Input feeding using a GRU layer ")
+    input = onmt.GRUNode(self.args.inputSize, self.args.rnnSize)({inputFeed, input})
+    input = nn.Dropout(self.rnn.dropout)(input)
+  elseif self.args.inputFeed == 1 then
+		_G.logger:info(" * Input feeding using concatenation ")
+		input = nn.JoinTable(2)({input, inputFeed})
   end
   table.insert(states, input)
 
@@ -190,8 +196,8 @@ function Decoder:_buildModel()
   
   if self.args.coverageSize == 0 then
 	  if self.args.attention == 'global' then
-		--~ attnLayer = onmt.GlobalAttention(self.args.rnnSize)
-			attnLayer = onmt.GlobalMLPAttention(self.args.rnnSize)
+			attnLayer = onmt.GlobalAttention(self.args.rnnSize)
+			--~ attnLayer = onmt.GlobalMLPAttention(self.args.rnnSize)
 	  elseif self.args.attention == 'cgate' then
 		attnLayer = onmt.ContextGateAttention(self.args.rnnSize)
 	  end
@@ -290,7 +296,7 @@ function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t
     inputSize = input:size(1)
   end
 
-  if self.args.inputFeed then
+  if self.args.inputFeed > 0 then
     if prevOut == nil then
       table.insert(inputs, onmt.utils.Tensor.reuseTensor(self.inputFeedProto,
                                                          { inputSize, self.args.rnnSize }))
@@ -451,7 +457,7 @@ function Decoder:backward(batch, outputs, criterion)
     gradStatesInput[#gradStatesInput]:zero()
 
     -- Accumulate previous output gradients with input feeding gradients.
-    if self.args.inputFeed and t > 1 then
+    if self.args.inputFeed > 0 and t > 1 then
       gradStatesInput[#gradStatesInput]:add(gradInput[self.args.inputIndex.inputFeed])
     end
     

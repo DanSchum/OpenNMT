@@ -157,12 +157,10 @@ end
 function Factory.buildDecoder(opt, inputNetwork, generator, verbose)
   local inputSize = inputNetwork.inputSize
 
-  if opt.input_feed == 1 then
-    if verbose then
-      _G.logger:info(' * using input feeding')
-    end
-    inputSize = inputSize + opt.rnn_size
-  end
+      
+	if opt.input_feed == 1 then
+		inputSize = inputSize + opt.rnn_size
+	end
 
   local RNN = onmt.LSTM
   if opt.rnn_type == 'GRU' then
@@ -176,7 +174,7 @@ function Factory.buildDecoder(opt, inputNetwork, generator, verbose)
     end
   end
 
-  return onmt.Decoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed == 1, opt.coverage)
+  return onmt.Decoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.coverage)
 end
 
 function Factory.buildWordDecoder(opt, dicts, verbose)
