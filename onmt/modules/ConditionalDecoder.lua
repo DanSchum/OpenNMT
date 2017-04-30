@@ -1,5 +1,3 @@
-print(" * Modified decoder for coverage and context gate attention - 23/3/2017")
-
 --[[ Unit to decode a sequence of output tokens.
 
      .      .      .             .
@@ -16,10 +14,10 @@ print(" * Modified decoder for coverage and context gate attention - 23/3/2017")
 Inherits from [onmt.Sequencer](onmt+modules+Sequencer).
 
 --]]
-local Decoder, parent = torch.class('onmt.Decoder', 'onmt.Sequencer')
+local ConditionalDecoder, parent = torch.class('onmt.ConditionalDecoder', 'onmt.Sequencer')
 
 
---[[ Construct a decoder layer.
+--[[ Construct a ConditionalDecoder layer.
 
 Parameters:
 
@@ -28,7 +26,7 @@ Parameters:
   * `generator` - optional, an output [onmt.Generator](onmt+modules+Generator).
   * `inputFeed` - bool, enable input feeding.
 --]]
-function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, coverage)
+function ConditionalDecoder:__init(inputNetwork, rnn, generator, attention, inputFeed, coverage)
   self.rnn = rnn
   self.inputNet = inputNetwork
 
@@ -39,7 +37,7 @@ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, cove
   self.args.inputIndex = {}
   self.args.outputIndex = {}
 
-  -- Input feeding means the decoder takes an extra
+  -- Input feeding means the ConditionalDecoder takes an extra
   -- vector each time representing the attention at the
   -- previous step.
   self.args.inputFeed = inputFeed
@@ -60,7 +58,7 @@ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, cove
 
   parent.__init(self, self:_buildModel())
 
-  -- The generator use the output of the decoder sequencer to generate the
+  -- The generator use the output of the ConditionalDecoder sequencer to generate the
   -- likelihoods over the target vocabulary.
   self.generator = generator
   self:add(self.generator)
@@ -68,9 +66,9 @@ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, cove
   self:resetPreallocation()
 end
 
---[[ Return a new Decoder using the serialized data `pretrained`. ]]
-function Decoder.load(pretrained)
-  local self = torch.factory('onmt.Decoder')()
+--[[ Return a new ConditionalDecoder using the serialized data `pretrained`. ]]
+function ConditionalDecoder.load(pretrained)
+  local self = torch.factory('onmt.ConditionalDecoder')()
 
   self.args = pretrained.args
 
@@ -84,14 +82,14 @@ function Decoder.load(pretrained)
 end
 
 --[[ Return data to serialize. ]]
-function Decoder:serialize()
+function ConditionalDecoder:serialize()
   return {
     modules = self.modules,
     args = self.args
   }
 end
 
-function Decoder:resetPreallocation()
+function ConditionalDecoder:resetPreallocation()
   if self.args.inputFeed then
     self.inputFeedProto = torch.Tensor()
   end
@@ -120,7 +118,7 @@ function Decoder:resetPreallocation()
   self.samplingProto = torch.Tensor()
 end
 
---[[ Build a default one time-step of the decoder
+--[[ Build a default one time-step of the ConditionalDecoder
 
 Returns: An nn-graph mapping
 
@@ -133,7 +131,7 @@ Returns: An nn-graph mapping
   ${if}$ is the input feeding, and
   ${a}$ is the context vector computed at this timestep.
 --]]
-function Decoder:_buildModel()
+function ConditionalDecoder:_buildModel()
   local inputs = {}
   local states = {}
 
@@ -172,7 +170,7 @@ function Decoder:_buildModel()
   
   
   local input = embedding
-  -- If set, concatenate previous decoder output.
+  -- If set, concatenate previous ConditionalDecoder output.
   if self.args.inputFeed then
     input = nn.JoinTable(2)({input, inputFeed})
   end
@@ -190,8 +188,7 @@ function Decoder:_buildModel()
   
   if self.args.coverageSize == 0 then
 	  if self.args.attention == 'global' then
-		--~ attnLayer = onmt.GlobalAttention(self.args.rnnSize)
-			attnLayer = onmt.GlobalMLPAttention(self.args.rnnSize)
+		attnLayer = onmt.GlobalAttention(self.args.rnnSize)
 	  elseif self.args.attention == 'cgate' then
 		attnLayer = onmt.ContextGateAttention(self.args.rnnSize)
 	  end
@@ -199,7 +196,7 @@ function Decoder:_buildModel()
 	  attnLayer = onmt.CoverageAttention(self.args.rnnSize, self.args.coverageSize)
   end
   
-  attnLayer.name = 'decoderAttn'
+  attnLayer.name = 'ConditionalDecoderAttn'
   
   -- prepare input for the attention module
   local attnInput = {outputs[#outputs], context}
@@ -233,7 +230,7 @@ end
 
   * See  [onmt.MaskedSoftmax](onmt+modules+MaskedSoftmax).
 --]]
-function Decoder:maskPadding(sourceSizes, sourceLength)
+function ConditionalDecoder:maskPadding(sourceSizes, sourceLength)
   if not self.decoderAttn then
     self.network:apply(function (layer)
       if layer.name == 'decoderAttn' then
@@ -276,7 +273,7 @@ Returns:
  1. `out` - Top-layer hidden state.
  2. `states` - All states.
 --]]
-function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t)
+function ConditionalDecoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t)
   local inputs = {}
 
   -- Create RNN input (see sequencer.lua `buildNetwork('dec')`).
@@ -345,7 +342,7 @@ end
   * `func` - Calls `func(out, t)` each timestep.
 --]]
 
-function Decoder:forwardAndApply(batch, encoderStates, context, func)
+function ConditionalDecoder:forwardAndApply(batch, encoderStates, context, func)
   -- TODO: Make this a private method.
 
   if self.statesProto == nil then
@@ -374,7 +371,7 @@ end
 
   Returns: Table of top hidden state for each timestep.
 --]]
-function Decoder:forward(batch, encoderStates, context)
+function ConditionalDecoder:forward(batch, encoderStates, context)
   encoderStates = encoderStates
     or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
                                          onmt.utils.Cuda.convert(torch.Tensor()),
@@ -403,7 +400,7 @@ Parameters:
   Note: This code runs both the standard backward and criterion forward/backward.
   It returns both the gradInputs and the loss.
   -- ]]
-function Decoder:backward(batch, outputs, criterion)
+function ConditionalDecoder:backward(batch, outputs, criterion)
   if self.gradOutputsProto == nil then
     self.gradOutputsProto = onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
                                                               self.gradOutputProto,
@@ -481,7 +478,7 @@ Parameters:
   * `criterion` - a pointwise criterion.
 
 --]]
-function Decoder:computeLoss(batch, encoderStates, context, criterion)
+function ConditionalDecoder:computeLoss(batch, encoderStates, context, criterion)
   encoderStates = encoderStates
     or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
                                          onmt.utils.Cuda.convert(torch.Tensor()),
@@ -507,7 +504,7 @@ Parameters:
   * `context` - the attention context.
 
 --]]
-function Decoder:computeScore(batch, encoderStates, context)
+function ConditionalDecoder:computeScore(batch, encoderStates, context)
   encoderStates = encoderStates
     or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
                                          onmt.utils.Cuda.convert(torch.Tensor()),
@@ -527,7 +524,7 @@ function Decoder:computeScore(batch, encoderStates, context)
   return score
 end
 
-function Decoder:sampleBatch(batch, encoderStates, context, maxLength, argmax)
+function ConditionalDecoder:sampleBatch(batch, encoderStates, context, maxLength, argmax)
 	
 	maxLength = maxLength or onmt.Constants.MAX_TARGET_LENGTH
 	

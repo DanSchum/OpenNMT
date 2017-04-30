@@ -16,6 +16,7 @@ require('onmt.modules.FeaturesEmbedding')
 
 -- Attention modules
 require('onmt.modules.GlobalAttention')
+require('onmt.modules.GlobalMLPAttention')
 require('onmt.modules.ContextGateAttention')
 
 
@@ -33,5 +34,7 @@ require('onmt.modules.Utils.SequenceLinear')
 require('onmt.modules.Utils.Replicator')
 require('onmt.modules.Utils.Energy')
 require('onmt.modules.Utils.LayerNormalization')
+require('onmt.modules.Utils.ExpandAs')
+require('onmt.modules.Utils.JoinReplicateTable')
 
 return onmt
