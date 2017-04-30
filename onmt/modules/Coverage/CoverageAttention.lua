@@ -38,19 +38,17 @@ function CoverageAttention:_buildModel(dim, coverageDim)
   table.insert(inputs, nn.Identity()()) -- Context matrix batchL x sourceL x dim
   table.insert(inputs, nn.Identity()()) -- coverage vector batchL x sourceL x covDim
 
-  local ht = inputs[1]
+  local targetT = nn.Linear(dim, dim, false)(inputs[1]) -- batchL x dim
   local context = inputs[2] -- batchL x sourceTimesteps x dim
-  local transformedCoverage = onmt.SequenceLinear(coverageDim, dim, false)(inputs[3])
   
-  local score_ht_hs
-	local ht2 = nn.Replicate(1,2)(ht) -- batchL x 1 x dim
-	local ht_hs = onmt.JoinReplicateTable(2,3)({ht2, context, transformedCoverage})
-	local Wa_ht_hs = nn.Bottle(nn.Linear(dim*3, dim, false),2)(ht_hs)
-	local tanh_Wa_ht_hs = nn.Tanh()(Wa_ht_hs)
-	score_ht_hs = nn.Bottle(nn.Linear(dim,1),2)(tanh_Wa_ht_hs)
+  local transformedCoverage = onmt.SequenceLinear(coverageDim, dim, false)(inputs[3]) -- no bias here 
+  
+  -- update the context matrix with the coverage vector
+  local coveragedContext = nn.CAddTable()({context, transformedCoverage})
   
   -- Get attention.
-  attn = nn.Sum(3)(score_ht_hs)
+  local attn = nn.MM()({coveragedContext, nn.Replicate(1,3)(targetT)}) -- batchL x sourceL x 1
+  attn = nn.Sum(3)(attn)
   local softmaxAttn = nn.SoftMax()
   softmaxAttn.name = 'softmaxAttn'
   local alignmentVector = softmaxAttn(attn)
@@ -75,7 +73,7 @@ function CoverageAttention:_buildModel(dim, coverageDim)
   
   -- Also reupdate the coverage vector
   
-  local newCoverage = onmt.ContextCoverage(dim, coverageDim)({inputs[3], inputs[2], alignmentVector, ht})
+  local newCoverage = onmt.ContextCoverage(dim, coverageDim)({inputs[3], inputs[2], alignmentVector})
 
   return nn.gModule(inputs, {contextOutput, newCoverage})
 end

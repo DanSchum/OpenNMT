@@ -1,4 +1,4 @@
-print(" * Updated latest version with ContextCoverage (not tested) and Global Dot Attention")
+print(" * Modified decoder for coverage and context gate attention - 23/3/2017")
 
 --[[ Unit to decode a sequence of output tokens.
 
