@@ -49,6 +49,7 @@ build = {
     ["onmt.modules.Utils.ExpandAs"] = "onmt/modules/Utils/ExpandAs.lua",
     ["onmt.modules.LSTM"] = "onmt/modules/LSTM.lua",
     ["onmt.modules.GRU"] = "onmt/modules/GRU.lua",
+    ["onmt.modules.GRUNode"] = "onmt/modules/GRUNode.lua",
     ["onmt.modules.MaskedSoftmax"] = "onmt/modules/MaskedSoftmax.lua",
     ["onmt.modules.Sequencer"] = "onmt/modules/Sequencer.lua",
     ["onmt.modules.WordEmbedding"] = "onmt/modules/WordEmbedding.lua",
