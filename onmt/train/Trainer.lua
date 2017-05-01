@@ -107,6 +107,8 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
   optim:setOptimStates(#_G.params)
   
   
+  
+  
   -- this function runs the model regardless of epoch
   -- and do validation for every n steps
   local function trainModel()
@@ -139,6 +141,8 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 			optim:updateLearningRate(validPpl, currentEpoch)
 			_G.logger:info('')
 		end
+		
+		
 		
 		while currentEpoch <= self.args.end_epoch do
 		
@@ -219,6 +223,15 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
     
     local iter = startI
     
+    local function validAndSave(iter)
+			_G.logger:info('')
+			_G.logger:info('Doing validation ...')
+			local validPpl = eval(model, validData)
+			local validBleu = evalBLEU(model, validData)
+			checkpoint:saveIteration(iter, numIterations, epochState, batchOrder, validPpl, validBleu, true)
+			_G.logger:info('')
+		end
+    
     -- Looping over the batches
     for i = startI, trainData:batchCount() do
 			local batches = {}
@@ -253,10 +266,13 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 			if iter % self.args.report_every == 0 then
 				epochState:log(iter)
 			end
+			
+			
 					
 			if self.args.save_every > 0 and iter % self.args.save_every == 0 then
 				--~ checkpoint:saveIteration(iter, epochState, batchOrder, true)
-				checkpoint:saveIteration(iter, numIterations, epochState, batchOrder, 9999, 0, true)
+				--~ checkpoint:saveIteration(iter, numIterations, epochState, batchOrder, 9999, 0, true)
+				validAndSave(iter)
 			end
 			iter = iter + 1
         

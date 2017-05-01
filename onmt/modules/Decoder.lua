@@ -78,6 +78,10 @@ function Decoder.load(pretrained)
   parent.__init(self, pretrained.modules[1])
   self.generator = pretrained.modules[2]
   self:add(self.generator)
+  
+  if self.args.inputFeed == true then
+		self.args.inputFeed = 1
+  end
 
   self:resetPreallocation()
 

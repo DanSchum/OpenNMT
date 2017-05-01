@@ -145,7 +145,6 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 			local validPpl = eval(model, validData)
 			local validBleu = evalBLEU(model, validData)
 			checkpoint:saveIteration(iter, numIterations, epochState, batchOrder, validPpl, validBleu, true)
-			optim:updateLearningRate(validPpl, currentEpoch)
 			_G.logger:info('')
 		end
 
