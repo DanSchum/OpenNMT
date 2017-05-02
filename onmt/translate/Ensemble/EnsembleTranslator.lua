@@ -34,6 +34,7 @@ local options = {
   {'-n_best', 1, [[If > 1, it will also output an n_best list of decoded sentences]]},
   {'-save_mem', 1, [[If = 1, it will clear the model states to reduce memory load. However the loading state could be a bit slower.]]},
   {'-ensemble_ops', 'sum', [[ensemble operator: sum or logsum.]]},
+  {'-normalize_length', true, [[If true, it will also normalize the score of the ]]},
   {'-max_num_unks', math.huge, [[All sequences with more unks than this will be ignored
                                during beam search]]},
   {'-pre_filter_factor', 1, [[Optional, set this only if filter is being used. Before
@@ -364,7 +365,7 @@ function Translator:translateBatch(batch)
     local attnBatch = {}
     local scoresBatch = {}
 
-    for n = 1, self.opt.n_best do
+    for n = 1, self.opt.beam_size do
       local result = results[b][n]
       local tokens = result.tokens
       local score = result.score
@@ -432,15 +433,42 @@ function Translator:translate(src, gold)
 	--~ print(predFeats[1])
     for b = 1, batch.size do
       results[b] = {}
+      
+      local unsortedResult = {}
+      
 
       results[b].preds = {}
-      for n = 1, self.opt.n_best do
-        results[b].preds[n] = {}
-        results[b].preds[n].words = self:buildTargetWords(pred[b][n], src[indexMap[b]].words, attn[b][n])
-        results[b].preds[n].features = self:buildTargetFeatures(predFeats[b][n])
-        results[b].preds[n].attention = attn[b][n]
-        results[b].preds[n].score = predScore[b][n]
+      --~ for n = 1, self.opt.beam_size do
+        --~ results[b].preds[n] = {}
+        --~ results[b].preds[n].words = self:buildTargetWords(pred[b][n], src[indexMap[b]].words, attn[b][n])
+        --~ results[b].preds[n].features = self:buildTargetFeatures(predFeats[b][n])
+        --~ results[b].preds[n].attention = attn[b][n]
+        --~ results[b].preds[n].score = predScore[b][n]
+      --~ end
+      local scoreVector = torch.Tensor(self.opt.beam_size)
+      local lengthVector = torch.Tensor(self.opt.beam_size)
+      
+      for n = 1, self.opt.beam_size do
+        unsortedResult[n] = {}
+        unsortedResult[n].words = self:buildTargetWords(pred[b][n], src[indexMap[b]].words, attn[b][n])
+        unsortedResult[n].features = self:buildTargetFeatures(predFeats[b][n])
+        unsortedResult[n].attention = attn[b][n]
+        unsortedResult[n].score = predScore[b][n]
+        
+        scoreVector[n] = unsortedResult[n].score
+        lengthVector[n] = #unsortedResult[n].words 
       end
+			
+			if self.opt.normalize_length == true then
+				scoreVector:cdiv(lengthVector)
+			end
+      local sortedValues, sortedId = torch.sort(scoreVector, 1, true)
+      for i = 1, self.opt.beam_size do
+				
+				results[b].preds[i] = unsortedResult[sortedId[i]]
+				results[b].preds[i].score = sortedValues[i]
+      end
+      
 
       if goldScore ~= nil then
         results[b].goldScore = goldScore[b]

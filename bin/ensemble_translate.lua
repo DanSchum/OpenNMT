@@ -6,6 +6,7 @@ local options = {
   {'-src', '', [[Source sequence to decode (one line per sequence)]],
                {valid=onmt.utils.ExtendedCmdLine.nonEmpty}},
   {'-tgt', '', [[True target sequence (optional)]]},
+  {'-print_nbest', false, [[True target sequence (optional)]]},
   {'-output', 'pred.txt', [[Path to output the predictions (each line will be the decoded sequence)]]}
 }
 
@@ -117,28 +118,27 @@ local function main()
               predScoreTotal = predScoreTotal + results[b].preds[n].score
               predWordsTotal = predWordsTotal + #results[b].preds[n].words
 
-              if #results[b].preds > 1 then
+              if opt.print_nbest == true then
                 _G.logger:info('')
                 _G.logger:info('BEST HYP:')
               end
             end
 
-            if #results[b].preds > 1 then
+            if opt.print_nbest == true then
 							local sentWithScore = string.format("%i ||| %s ||| %.2f", sentId, sentence, results[b].preds[n].score)
 							outFile:write(sentWithScore .. '\n')
               _G.logger:info(sentWithScore)
             else
-							outFile:write(sentence .. '\n')
-              _G.logger:info("PRED %d: %s", sentId, sentence)
-              _G.logger:info("PRED SCORE: %.2f", results[b].preds[n].score)
+							if n == 1 then
+								outFile:write(sentence .. '\n')
+								_G.logger:info("PRED %d: %s", sentId, sentence)
+								_G.logger:info("PRED SCORE: %.2f", results[b].preds[n].score)
+              end
             end
           end
         end
 
         _G.logger:info('')
-        if #results[b].preds > 1 then
-					outFile:write('\n')
-        end
         sentId = sentId + 1
       end
 

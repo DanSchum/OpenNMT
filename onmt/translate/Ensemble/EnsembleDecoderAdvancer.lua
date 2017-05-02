@@ -200,10 +200,6 @@ function DecoderAdvancer:expand(beam)
   
   local features = {}
   
-  -- Adding word penalty to get sentences with better length
-  -- We can also consider normalizing Prob with length but this is easy
-  out[1] = out[1] + self.word_pen
-  
   for j = 2, #out do
 	local _, best = out[j]:max(2)
     features[j - 1] = best:view(-1)

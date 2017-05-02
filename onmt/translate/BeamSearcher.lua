@@ -41,9 +41,10 @@ in the batch.
 
 ]]
 function BeamSearcher:search(beamSize, nBest, preFilterFactor, keepInitial)
-  self.nBest = nBest or 1
+  
   self.beamSize = beamSize or 1
-  assert (self.nBest <= self.beamSize)
+  self.nBest = self.beamSize
+  assert(self.nBest <= self.beamSize, 'beam size must be greater or equal to the n-best list size')
   self.preFilterFactor = preFilterFactor or 1
   self.keepInitial = keepInitial or false
 
@@ -84,16 +85,34 @@ end
 
 -- Find the top beamSize hypotheses (satisfying filters).
 function BeamSearcher:_findKBest(beams, scores)
+
+  local function topk(tensor, ...)
+    if torch.typename(tensor) == 'torch.CudaHalfTensor' then
+      tensor = tensor:cuda()
+    end
+    return tensor:topk(...)
+  end
+
   local t = #beams
   local vocabSize = scores:size(2)
-  local expandedScores = beams[t]:_expandScores(scores, self.beamSize)
+  local expandedScores, expandedNormScores = beams[t]:_expandScores(scores, self.beamSize)
 
   -- Find top beamSize * preFilterFactor hypotheses.
   local considered = self.beamSize * self.preFilterFactor
-  local consideredScores, consideredIds = expandedScores:topk(considered, 2, true, true)
+  local consideredNormScores, consideredIds = topk(expandedNormScores, considered, 2, true, true)
+  local consideredScores = expandedScores:gather(2, consideredIds)
+
   consideredIds:add(-1)
+
   local consideredBackPointer = (consideredIds:clone():div(vocabSize)):add(1)
-  local consideredToken = consideredIds:fmod(vocabSize):add(1):view(-1)
+  local consideredToken = consideredIds:view(-1)
+  if consideredToken.fmod then
+    consideredToken = consideredToken:fmod(vocabSize):add(1)
+  else
+    for i = 1, consideredToken:size(1) do
+      consideredToken[i] = math.fmod(consideredToken[i], vocabSize) + 1
+    end
+  end
 
   local newBeam = beams[t]:_nextBeam(consideredToken, consideredScores,
                                     consideredBackPointer, self.beamSize)
@@ -102,13 +121,15 @@ function BeamSearcher:_findKBest(beams, scores)
   local pruned = self.advancer:filter(newBeam)
   if pruned and pruned:any() then
     consideredScores:view(-1):maskedFill(pruned, -math.huge)
+    consideredNormScores:view(-1):maskedFill(pruned, -math.huge)
   end
 
   -- Find top beamSize hypotheses.
   if ((not pruned) or (not pruned:any())) and (self.preFilterFactor == 1) then
     beams[t + 1] = newBeam
   else
-    local kBestScores, kBestIds = consideredScores:topk(self.beamSize, 2, true, true)
+    local _, kBestIds = topk(consideredNormScores, self.beamSize, 2, true, true)
+    local kBestScores = consideredScores:gather(2, kBestIds)
     local backPointer = consideredBackPointer:gather(2, kBestIds)
     local token = consideredToken
       :viewAs(consideredIds)

@@ -198,6 +198,7 @@ function Beam:__init(token, state, params, batchSize)
     self._params.length_norm = 0.0
     self._params.coverage_norm = 0.0
     self._params.eos_norm = 0.0
+    self._params.word_pen = 0.0
   end
 
   self._scores = torch.zeros(self._remaining)
@@ -345,6 +346,12 @@ function Beam:_normalizeScores(scores)
   end
 
   local normScores = scores
+  
+  --~ normScores = torch.add(normScores, self._params.word_pen * self._step)
+  
+  --~ normScores:select(2, onmt.Constants.EOS):add(-self._params.word_pen)
+  --~ normScores:select(2, onmt.Constants.PAD):add(-self._params.word_pen)
+  --~ normScores:select(2, onmt.Constants.BOS):add(-self._params.word_pen)
 
   if self._params.length_norm ~= 0 then
     local step = self._step

@@ -70,6 +70,7 @@ function DecoderAdvancer:initBeam()
   params.length_norm = self.length_norm
   params.coverage_norm = self.coverage_norm
   params.eos_norm = self.eos_norm
+  params.word_pen = self.word_pen
   return onmt.translate.Beam.new(tokens, state, params)
 end
 
@@ -127,9 +128,7 @@ function DecoderAdvancer:expand(beam)
   local out = self.decoder.generator:forward(decOut)
   local features = {}
   
-  out[1] = out[1] + self.word_pen
   
-  --~ print(#out)
   for j = 2, #out do
 	-- Adding word penalty to get sentences with better length
 	-- We can also consider normalizing Prob with length but this is easy
