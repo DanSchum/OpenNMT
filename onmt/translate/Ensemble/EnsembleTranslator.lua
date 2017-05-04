@@ -34,7 +34,8 @@ local options = {
   {'-n_best', 1, [[If > 1, it will also output an n_best list of decoded sentences]]},
   {'-save_mem', 1, [[If = 1, it will clear the model states to reduce memory load. However the loading state could be a bit slower.]]},
   {'-ensemble_ops', 'sum', [[ensemble operator: sum or logsum.]]},
-  {'-normalize_length', true, [[If true, it will also normalize the score of the ]]},
+  {'-normalize_length', true, [[If true, it will also normalize the score of the sentence ]]},
+  {'-save_mem', false, [[If true, it will try to deallocate unnecessary memory more often. Use it with THC_CACHING_ALLOCATOR=0.]]},
   {'-max_num_unks', math.huge, [[All sequences with more unks than this will be ignored
                                during beam search]]},
   {'-pre_filter_factor', 1, [[Optional, set this only if filter is being used. Before
@@ -295,29 +296,39 @@ end
 
 function Translator:translateBatch(batch)
 
-  --~ self.models.encoder:maskPadding()
-  --~ self.models.decoder:maskPadding()
+
   for i = 1, self.nModels do
-	self.models[i].encoder:maskPadding()
-	self.models[i].decoder:maskPadding()
+		self.models[i].encoder:maskPadding()
+		self.models[i].decoder:maskPadding()
+		onmt.utils.Cuda.convert(self.models[i].encoder)
   end
+  
+  
   
   local encStates = {}
   local contexts = {}
   
   for i = 1, self.nModels do
-		encStates[i], contexts[i] = self.models[i].encoder:forward(batch)
+		local encState, context = self.models[i].encoder:forward(batch)
+		encStates[i] = onmt.utils.Tensor.recursiveClone(encState)
+		contexts[i] = onmt.utils.Tensor.recursiveClone(context)
   end
+  
+  if self.opt.save_mem == true then
+		print("Saving memory")
+		for i = 1, self.nModels do
+			self.models[i].encoder:float()
+		end
+		collectgarbage()
+  end
+  
+  cutorch.synchronize()
 
   --~ local encStates, context = self.models.encoder:forward(batch)
 
   -- Compute gold score.
   local goldScore
   if batch.targetInput ~= nil then
-    --~ if batch.size > 1 then
-      --~ self.models.decoder:maskPadding(batch.sourceSize, batch.sourceLength)
-    --~ end
-    --~ goldScore = self.models.decoder:computeScore(batch, encStates, context)
     goldScore = self:computeGoldScore(batch, encStates, contexts)
   end
   
@@ -395,7 +406,15 @@ function Translator:translateBatch(batch)
     table.insert(allAttn, attnBatch)
     table.insert(allScores, scoresBatch)
   end
-
+  
+  if self.opt.save_mem == true then
+		cutorch.synchronize()
+		collectgarbage()
+		for i = 1, self.nModels do
+			clearStateModel(self.models[i].encoder)
+			clearStateModel(self.models[i].decoder)
+		end
+	end
   return allHyp, allFeats, allScores, allAttn, goldScore
 end
 

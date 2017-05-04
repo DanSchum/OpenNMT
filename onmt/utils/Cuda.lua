@@ -53,13 +53,13 @@ function Cuda.init(opt, masterGPU)
       end
     end)
 
-    if err then
-      if opt.fallback_to_cpu then
-        _G.logger:warning('Falling back to CPU')
-        Cuda.activated = false
-      else
-        error(err)
-      end
+    --~ if err then
+		if opt.fallback_to_cpu then
+			_G.logger:warning('Falling back to CPU')
+			Cuda.activated = false
+		--~ else
+        --~ error(err)
+      --~ end
     end
   end
 end

@@ -469,6 +469,13 @@ function Beam:_cleanUp(keptIndexes)
     keptState[val] = self._state[val]
   end
   self._state = keptState
+	
+	local t = self._state[8]
+	
+	--~ clear memory every 10 step
+	--~ if self._step % 10 == 0 then
+	collectgarbage()
+	--~ end
 end
 
 -- Add completed hypotheses to buffer.
