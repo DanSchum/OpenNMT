@@ -60,23 +60,6 @@ function Translator:__init(args)
   
   self.models = {}
 
-  --~ self.checkpoints = {}
- 
-  --~ for i = 1, nModels do
-	--~ _G.logger:info('Loading \'' .. models[i] .. '\'...')
-		--~ self.checkpoints[i] = torch.load(models[i])
-  --~ end 
-  
-  --~ _G.logger:info('Checking Vocabularies ...')
-  
-  --~ local srcVocabSize = self.checkpoints[1].dicts.src.words:size()
-  --~ local tgtVocabSize = self.checkpoints[1].dicts.tgt.words:size()
-  --~ for i = 2, nModels do
-		--~ assert(self.checkpoints[i].dicts.src.words:size() == srcVocabSize)
-		--~ assert(self.checkpoints[i].dicts.tgt.words:size() == tgtVocabSize)
-  --~ end
-  
-  --~ local dicts
 	for i = 1, nModels do
 		_G.logger:info('Loading \'' .. models[i] .. '\'...')
 		
@@ -322,8 +305,6 @@ function Translator:translateBatch(batch)
 		collectgarbage()
   end
   
-  cutorch.synchronize()
-
   --~ local encStates, context = self.models.encoder:forward(batch)
 
   -- Compute gold score.
@@ -408,7 +389,6 @@ function Translator:translateBatch(batch)
   end
   
   if self.opt.save_mem == true then
-		cutorch.synchronize()
 		collectgarbage()
 		for i = 1, self.nModels do
 			clearStateModel(self.models[i].encoder)

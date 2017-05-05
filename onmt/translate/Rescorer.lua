@@ -27,26 +27,72 @@ end
 function Rescorer:__init(args)
   self.opt = args
   onmt.utils.Cuda.init(self.opt)
+  
+  local models = pl.utils.split(self.opt.model, '|')
+  
+  local nModels = #models
+  
+  self.models = {}
 
-  _G.logger:info('Loading \'' .. self.opt.model .. '\'...')
-  self.checkpoint = torch.load(self.opt.model)
+	for i = 1, nModels do
+		_G.logger:info('Loading \'' .. models[i] .. '\'...')
+		
+		local checkpoint = torch.load(models[i])
+		
+		
+		-- checking vocabularies with the same size
+		if i == 1 then
+			self.dicts = checkpoint.dicts
+		else
+			local srcVocabSize = checkpoint.dicts.src.words:size()
+			local tgtVocabSize = checkpoint.dicts.tgt.words:size()
+			
+			assert(self.dicts.src.words:size() == srcVocabSize)
+			assert(self.dicts.tgt.words:size() == tgtVocabSize)
+		end
+		
+		self.models[i] = {}
+		self.models[i].encoder = onmt.Factory.loadEncoder(checkpoint.models.encoder)
+		self.models[i].decoder = onmt.Factory.loadDecoder(checkpoint.models.decoder)
+		
+		clearStateModel(self.models[i].encoder)
+		clearStateModel(self.models[i].decoder)
+		-- save memory
+		checkpoint = nil
+		collectgarbage()
+		
+		self.models[i].encoder:evaluate()
+		self.models[i].decoder:evaluate()
+		onmt.utils.Cuda.convert(self.models[i].encoder)
+		onmt.utils.Cuda.convert(self.models[i].decoder)
+	end
+  
   _G.logger:info('Done...')
+  
+  self.nModels = nModels
+  
+  self.logSoftMax = nn.LogSoftMax()
+  onmt.utils.Cuda.convert(self.logSoftMax)
+
+  --~ _G.logger:info('Loading \'' .. self.opt.model .. '\'...')
+  --~ self.checkpoint = torch.load(self.opt.model)
+  --~ _G.logger:info('Done...')
  
 
-  self.models = {}
-  self.models.encoder = onmt.Factory.loadEncoder(self.checkpoint.models.encoder)
-  self.models.decoder = onmt.Factory.loadDecoder(self.checkpoint.models.decoder)
+  --~ self.models = {}
+  --~ self.models.encoder = onmt.Factory.loadEncoder(self.checkpoint.models.encoder)
+  --~ self.models.decoder = onmt.Factory.loadDecoder(self.checkpoint.models.decoder)
   
-  clearStateModel(self.models.encoder)
-	clearStateModel(self.models.decoder)
+  --~ clearStateModel(self.models.encoder)
+	--~ clearStateModel(self.models.decoder)
 
-  self.models.encoder:evaluate()
-  self.models.decoder:evaluate()
+  --~ self.models.encoder:evaluate()
+  --~ self.models.decoder:evaluate()
 
-  onmt.utils.Cuda.convert(self.models.encoder)
-  onmt.utils.Cuda.convert(self.models.decoder)
+  --~ onmt.utils.Cuda.convert(self.models.encoder)
+  --~ onmt.utils.Cuda.convert(self.models.decoder)
 
-  self.dicts = self.checkpoint.dicts
+  --~ self.dicts = self.checkpoint.dicts
   
   self.checkpoint = nil
   collectgarbage()

@@ -54,10 +54,11 @@ local function main()
 	
 	local nbestSize = 0
 	
+	local startID = 0
 	while true do
 		local tgtTokens = testReader:next()
-		--~ print(tgtTokens)	
-		if #tgtTokens > 0 then
+		local sentID = tgtTokens[1]
+		if #tgtTokens > 0  and startID == 0 then
 			nbestSize = nbestSize + 1
 		else
 			break
@@ -120,22 +121,7 @@ local function main()
 	
 
   end
-
-  --~ if opt.time then
-    --~ local time = timer:time()
-    --~ local sentenceCount = sentId
-    --~ _G.logger:info("Average sentence translation time (in seconds):\n")
-    --~ _G.logger:info("avg real\t" .. time.real / sentenceCount .. "\n")
-    --~ _G.logger:info("avg user\t" .. time.user / sentenceCount .. "\n")
-    --~ _G.logger:info("avg sys\t" .. time.sys / sentenceCount .. "\n")
-  --~ end
-
-  --~ reportScore('PRED', predScoreTotal, predWordsTotal)
-
-  --~ if withGoldScore then
-    --~ reportScore('GOLD', goldScoreTotal, goldWordsTotal)
-  --~ end
-
+  
   outFile:close()
   _G.logger:shutDown()
 end
