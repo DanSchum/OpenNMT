@@ -474,7 +474,7 @@ function Beam:_cleanUp(keptIndexes)
 	
 	--~ clear memory every 10 step
 	--~ if self._step % 10 == 0 then
-	collectgarbage()
+	--~ collectgarbage()
 	--~ end
 end
 

@@ -53,7 +53,11 @@ function ContextCoverage:_buildModel(hiddenSize, coverageSize)
   
   local gatedH = nn.CMulTable()({rGate, lastCoverage})
   
-  local candidateH = nn.Tanh()(buildGate(gatedH, context, alignment))
+  --~ local candidateH = nn.Tanh()(buildGate(gatedH, context, alignment))
+  
+  local projectedAlign = onmt.SequenceLinear(1, coverageSize)(align)
+  local projectedcontext = onmt.SequenceLinear(hiddenSize, coverageSize)(context)
+  candidateH = nn.Tanh()(nn.CAddTable()({gatedH, projectedAlign, projectedContext}))
   
   
   -- compute new interpolated hidden state, based on the update gate

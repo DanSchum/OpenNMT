@@ -173,7 +173,7 @@ function DecoderAdvancer:update(beam)
   
   t = t + 1
   local nextState = {newStates, newOuts, newCovs, contexts, ensembledAttn, nil, sourceSizes, t}
-  collectgarbage()
+  --~ collectgarbage()
   beam:setState(nextState)
 end
 
@@ -207,8 +207,7 @@ function DecoderAdvancer:expand(beam)
 				score[n]:add(newScore[n])
 			end
 			--~ self.decoders[i]:clearState()
-			collectgarbage()
-		end
+			end
   end
   
   for n = 1, #score do
