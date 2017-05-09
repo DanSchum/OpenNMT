@@ -114,11 +114,11 @@ function Factory.buildEncoder(opt, inputNetwork)
       error('invalid merge action ' .. opt.brnn_merge)
     end
 
-    local rnn = RNN.new(opt.layers, inputNetwork.inputSize, rnnSize, opt.dropout, opt.residual, opt.dropout_input)
+    local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, rnnSize, opt.dropout, opt.residual, opt.dropout_input)
 
     encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt.brnn_merge)
   else
-    local rnn = RNN.new(opt.layers, inputNetwork.inputSize, opt.rnn_size, opt.dropout, opt.residual, opt.dropout_input)
+    local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, opt.rnn_size, opt.dropout, opt.residual, opt.dropout_input)
 
     encoder = onmt.Encoder.new(inputNetwork, rnn)
   end

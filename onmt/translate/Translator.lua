@@ -66,6 +66,12 @@ function Translator:__init(args)
 
   onmt.utils.Cuda.convert(self.models.encoder)
   onmt.utils.Cuda.convert(self.models.decoder)
+  
+  self.models.sync = true
+  
+  if self.models.encoder.layers and self.models.encoder.layers ~= self.models.decoder.layers then
+		self.models.sync = false
+  end
 
   self.dicts = self.checkpoint.dicts
 
@@ -191,6 +197,10 @@ function Translator:translateBatch(batch)
   self.models.decoder:maskPadding()
 
   local encStates, context = self.models.encoder:forward(batch)
+  
+	if self.models.sync == false then
+		encStates = nil
+	end
 
   -- Compute gold score.
   local goldScore

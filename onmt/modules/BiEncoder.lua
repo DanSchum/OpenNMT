@@ -53,6 +53,7 @@ function BiEncoder:__init(input, rnn, merge)
 
   self.args.rnnSize = rnn.outputSize
   self.args.numEffectiveLayers = rnn.numEffectiveLayers
+  self.args.layers = rnn.layers
 
   if self.args.merge == 'concat' then
     self.args.hiddenSize = self.args.rnnSize * 2

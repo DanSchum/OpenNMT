@@ -1,5 +1,3 @@
-print(" * Modified decoder for coverage and context gate attention - 23/3/2017")
-
 --[[ Unit to decode a sequence of output tokens.
 
      .      .      .             .
@@ -203,7 +201,10 @@ function Decoder:_buildModel()
 			attnLayer = onmt.GlobalAttention(self.args.rnnSize)
 			--~ attnLayer = onmt.GlobalMLPAttention(self.args.rnnSize)
 	  elseif self.args.attention == 'cgate' then
-		attnLayer = onmt.ContextGateAttention(self.args.rnnSize)
+			attnLayer = onmt.ContextGateAttention(self.args.rnnSize)
+	  elseif self.args.attention == 'mlp' then
+			_G.logger:info(" * Using MLP style attention layer")
+			attnLayer = onmt.GlobalMLPAttention(self.args.rnnSize)
 	  end
   else
 	  attnLayer = onmt.CoverageAttention(self.args.rnnSize, self.args.coverageSize)
@@ -553,6 +554,11 @@ function Decoder:sampleBatch(batch, encoderStates, context, maxLength, argmax)
                                                          self.stateProto,
                                                          { batch.size, self.args.rnnSize })
 	end
+	
+	encoderStates = encoderStates
+    or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
+                                         onmt.utils.Cuda.convert(torch.Tensor()),
+                                         { batch.size, self.args.rnnSize })
 	
 	local states = onmt.utils.Tensor.copyTensorTable(self.statesProto, encoderStates)
 	

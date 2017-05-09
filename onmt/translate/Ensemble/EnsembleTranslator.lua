@@ -81,6 +81,11 @@ function Translator:__init(args)
 		self.models[i].encoder = onmt.Factory.loadEncoder(checkpoint.models.encoder)
 		self.models[i].decoder = onmt.Factory.loadDecoder(checkpoint.models.decoder)
 		
+		self.models[i].sync = true
+		if self.models[i].encoder.layers and self.models[i].encoder.layers ~= self.models[i].decoder.layers then
+			self.models[i].sync = false
+		end
+		
 		clearStateModel(self.models[i].encoder)
 		clearStateModel(self.models[i].decoder)
 		-- save memory
@@ -292,9 +297,12 @@ function Translator:translateBatch(batch)
   local contexts = {}
   
   for i = 1, self.nModels do
-		local encState, context = self.models[i].encoder:forward(batch)
-		encStates[i] = onmt.utils.Tensor.recursiveClone(encState)
-		contexts[i] = onmt.utils.Tensor.recursiveClone(context)
+		encStates[i], contexts[i] = self.models[i].encoder:forward(batch)
+		
+		if self.models[i].sync == false then
+			encStates[i] = nil
+		end
+		
   end
   
   if self.opt.save_mem == true then

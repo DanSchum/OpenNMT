@@ -48,7 +48,8 @@ function CoverageAttention:_buildModel(dim, coverageDim)
   
   local transformedContext = onmt.SequenceLinear(dim, dim, false)(context)
   
-  local resizedTable = nn.ExpandAs()({transformedContext, targetT})
+  local repTargetT = nn.Replicate(1,2)(targetT)
+  local resizedTable = nn.ExpandAs()({transformedContext, repTargetT})
   
   local sum = nn.CAddTable()(resizedTable)
   

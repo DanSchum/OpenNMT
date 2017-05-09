@@ -40,11 +40,11 @@ function ContextCoverage:_buildModel(hiddenSize, coverageSize)
   
   -- In this GRU unit, there are actually three current inputs: context, alignment and hidden layer
   local function buildGate(cov, context, align)
-	local projectedContext = onmt.SequenceLinear(hiddenSize, coverageSize)(context) -- these two will play the role of 'x' in typical GRU
-	local projectedAlign = onmt.SequenceLinear(1, coverageSize)(align)
-	local projectedCov = onmt.SequenceLinear(coverageSize, coverageSize)(cov)	
-	
-	return nn.CAddTable()({projectedCov, projectedAlign, projectedContext})
+		local projectedContext = onmt.SequenceLinear(hiddenSize, coverageSize)(context) -- these two will play the role of 'x' in typical GRU
+		local projectedAlign = onmt.SequenceLinear(1, coverageSize)(align)
+		local projectedCov = onmt.SequenceLinear(coverageSize, coverageSize)(cov)	
+		
+		return nn.CAddTable()({projectedCov, projectedAlign, projectedContext})
   end
   
   local rGate = nn.Sigmoid()(buildGate(lastCoverage, context, alignment)) -- reset gate
@@ -55,8 +55,8 @@ function ContextCoverage:_buildModel(hiddenSize, coverageSize)
   
   --~ local candidateH = nn.Tanh()(buildGate(gatedH, context, alignment))
   
-  local projectedAlign = onmt.SequenceLinear(1, coverageSize)(align)
-  local projectedcontext = onmt.SequenceLinear(hiddenSize, coverageSize)(context)
+  local projectedAlign = onmt.SequenceLinear(1, coverageSize)(alignment)
+  local projectedContext = onmt.SequenceLinear(hiddenSize, coverageSize)(context)
   candidateH = nn.Tanh()(nn.CAddTable()({gatedH, projectedAlign, projectedContext}))
   
   

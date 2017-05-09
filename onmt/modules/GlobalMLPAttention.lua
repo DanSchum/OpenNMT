@@ -53,16 +53,6 @@ function GlobalMLPAttention:_buildModel(dim)
 	
 	local mapping = onmt.SequenceLinear(dim, 1)(tanhSum)
 	local score_ht_hs = mapping
-  
-  --~ local score_ht_hs
-	--~ local ht2 = nn.Replicate(1,2)(ht) -- batchL x 1 x dim
-	--~ local ht_hs = onmt.JoinReplicateTable(2,3)({ht2, context})
-	--~ local Wa_ht_hs = nn.Bottle(nn.Linear(dim*2, dim, false),2)(ht_hs)
-	--~ local tanh_Wa_ht_hs = nn.Tanh()(Wa_ht_hs)
-	--~ score_ht_hs = nn.Bottle(nn.Linear(dim,1),2)(tanh_Wa_ht_hs)
-	
-	
- 
 
 
   -- Get attention.
@@ -73,11 +63,22 @@ function GlobalMLPAttention:_buildModel(dim)
   attn = softmaxAttn(attn)
   attn = nn.Replicate(1,2)(attn) -- batchL x 1 x sourceL
 
-  -- Apply attention to context.
+    -- Apply attention to context.
   local contextCombined = nn.MM()({attn, context}) -- batchL x 1 x dim
-  contextCombined = nn.Sum(2)(contextCombined) -- batchL x dim
-  contextCombined = nn.JoinTable(2)({contextCombined, inputs[1]}) -- batchL x dim*2
-  local contextOutput = nn.Tanh()(nn.Linear(dim*2, dim, false)(contextCombined))
+  local contextVector = nn.Sum(2)(contextCombined) -- batchL x dim
+  
+  contextCombined = nn.JoinTable(2)({contextVector, inputs[1]})
+  
+  local contextGate = nn.Sigmoid()(nn.Linear(dim*2, dim, true)(contextCombined))
+  local inputGate = nn.AddConstant(1,false)(nn.MulConstant(-1,false)(contextGate))
+  
+  local gatedContext = nn.CMulTable()({contextGate, contextVector})
+  local gatedInput   = nn.CMulTable()({inputGate, inputs[1]})
+  
+  local gatedContextCombined = nn.JoinTable(2)({gatedContext, gatedInput})
+  
+  --~ contextCombined = nn.JoinTable(2)({contextCombined, inputs[1]}) -- batchL x dim*2
+  local contextOutput = nn.Tanh()(nn.Linear(dim*2, dim, false)(gatedContextCombined))
 
   return nn.gModule(inputs, {contextOutput})
 end

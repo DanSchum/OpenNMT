@@ -28,6 +28,7 @@ function Encoder:__init(inputNetwork, rnn)
   self.args = {}
   self.args.rnnSize = self.rnn.outputSize
   self.args.numEffectiveLayers = self.rnn.numEffectiveLayers
+  self.args.layers = self.rnn.layers
 
   parent.__init(self, self:_buildModel())
 

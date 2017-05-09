@@ -120,33 +120,32 @@ function GRU:_buildLayer(inputSize, hiddenSize)
 
   -- Recurrent input.
   local prevH = inputs[1]
+    
   -- Previous layer input.
   local x = inputs[2]
+  
+  -- compute 2 gates at once to get a little bit faster
+  local i2h = nn.Linear(inputSize, 2 * hiddenSize)(x)
+  local h2h = nn.Linear(hiddenSize, 2 * hiddenSize)(prevH)
+  local allInputSums = nn.CAddTable()({i2h, h2h})
+  local reshaped = nn.Reshape(2, hiddenSize)(allInputSums)
+  local n1, n2 = nn.SplitTable(2)(reshaped):split(2)
+    
+  local uGate = nn.Sigmoid()(n1)
+  
+  local rGate = nn.Sigmoid()(n2)
+  
+  local gatedHidden = nn.CMulTable()({rGate, prevH})
+  
+  local p2 = nn.Linear(hiddenSize, hiddenSize)(gatedHidden)
+  local p1 = nn.Linear(inputSize, hiddenSize)(x)
+  
+  local hiddenCandidate = nn.Tanh()(nn.CAddTable()({p1,p2}))
+  local zh = nn.CMulTable()({uGate, hiddenCandidate})
+  local zhm1 = nn.CMulTable()({nn.AddConstant(1,false)(nn.MulConstant(-1,false)(uGate)), prevH})
+  
+  local nextH = nn.CAddTable()({zh, zhm1})
 
-  -- Evaluate the input sums at once for efficiency.
-  local x2h = nn.Linear(inputSize, 3 * hiddenSize)(x)
-  local h2h = nn.Linear(hiddenSize, 3 * hiddenSize)(prevH)
-
-  -- Extract Wxr.x+bir, Wxi.x+bxi, Wxn.x+bin.
-  local x2h_reshaped = nn.Reshape(3, hiddenSize)(x2h)
-  local x2h_r, x2h_i, x2h_n = nn.SplitTable(2)(x2h_reshaped):split(3)
-
-  -- Extract Whr.x+bhr, Whi.x+bhi, Whn.x+bhn
-  local h2h_reshaped = nn.Reshape(3, hiddenSize)(h2h)
-  local h2h_r, h2h_i, h2h_n = nn.SplitTable(2)(h2h_reshaped):split(3)
-
-  -- Decode the gates.
-  local r = nn.Sigmoid()(nn.CAddTable()({x2h_r, h2h_r}))
-  local i = nn.Sigmoid()(nn.CAddTable()({x2h_i, h2h_i}))
-  local n = nn.Tanh()(nn.CAddTable()({
-    x2h_n, nn.CMulTable()({r, h2h_n})
-  }))
-
-  -- Perform the GRU update.
-  local nextH = nn.CAddTable()({
-    n,
-    nn.CMulTable()({i, nn.CAddTable()({prevH, nn.MulConstant(-1)(n)})})
-  })
 
   return nn.gModule(inputs, {nextH})
 end

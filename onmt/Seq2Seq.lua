@@ -2,7 +2,9 @@
 local Seq2Seq, parent = torch.class('Seq2Seq', 'Model')
 
 local options = {
-  {'-layers', 2,           [[Number of layers in the RNN encoder/decoder]],
+  {'-layers', 2,           [[Number of layers in the RNN decoder]],
+                     {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
+  {'-enc_layers', 2,           [[Number of layers in the RNN encoder/decoder]],
                      {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
   {'-rnn_size', 500, [[Size of RNN hidden states]],
                      {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
@@ -53,6 +55,12 @@ function Seq2Seq:__init(args, dicts, verbose)
   self.models.encoder = onmt.Factory.buildWordEncoder(args, dicts.src, verbose)
   self.models.decoder = onmt.Factory.buildWordDecoder(args, dicts.tgt, verbose)
   self.criterion = onmt.ParallelClassNLLCriterion(onmt.Factory.getOutputSizes(dicts.tgt))
+  
+  self.sync = true
+  if args.enc_layers and args.enc_layers ~= args.layers then
+		self.sync = false
+  end
+  
 end
 
 function Seq2Seq.load(args, models, dicts, isReplica)
@@ -64,6 +72,12 @@ function Seq2Seq.load(args, models, dicts, isReplica)
   self.models.encoder = onmt.Factory.loadEncoder(models.encoder, isReplica)
   self.models.decoder = onmt.Factory.loadDecoder(models.decoder, isReplica)
   self.criterion = onmt.ParallelClassNLLCriterion(onmt.Factory.getOutputSizes(dicts.tgt))
+  
+	self.sync = true
+  if args.enc_layers and args.enc_layers ~= args.layers then
+		self.sync = false
+  end
+ 
 
   return self
 end
@@ -91,12 +105,21 @@ end
 
 function Seq2Seq:forwardComputeLoss(batch)
   local encoderStates, context = self.models.encoder:forward(batch)
+  
+  if self.sync == false then
+		encGradStatesOut = nil
+  end
+  
   return self.models.decoder:computeLoss(batch, encoderStates, context, self.criterion)
 end
 
 function Seq2Seq:trainNetwork(batch, dryRun)
   local encStates, context = self.models.encoder:forward(batch)
-
+	
+	if self.sync == false then
+		encStates = nil
+	end
+	
   local decOutputs = self.models.decoder:forward(batch, encStates, context)
 
   if dryRun then
@@ -104,6 +127,11 @@ function Seq2Seq:trainNetwork(batch, dryRun)
   end
 
   local encGradStatesOut, gradContext, loss = self.models.decoder:backward(batch, decOutputs, self.criterion)
+  
+  if self.sync == false then
+		encGradStatesOut = nil
+  end
+  
   self.models.encoder:backward(batch, encGradStatesOut, gradContext)
 
   return loss
@@ -112,6 +140,10 @@ end
 function Seq2Seq:sampleBatch(batch, maxLength, argmax)
 	
 	local encStates, context = self.models.encoder:forward(batch)
+	
+	if self.sync == false then
+		encStates = nil
+	end
 	
 	local sampledBatch = self.models.decoder:sampleBatch(batch, encStates, context, maxLength, argmax)
 	
