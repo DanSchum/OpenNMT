@@ -61,6 +61,10 @@ function Seq2Seq:__init(args, dicts, verbose)
 		self.sync = false
   end
   
+  if self.sync == false then
+		_G.logger:info(" * Decoder and encoder have different number of layers. Bridging between them is thus not possible")
+  end
+  
 end
 
 function Seq2Seq.load(args, models, dicts, isReplica)
@@ -76,6 +80,10 @@ function Seq2Seq.load(args, models, dicts, isReplica)
 	self.sync = true
   if args.enc_layers and args.enc_layers ~= args.layers then
 		self.sync = false
+  end
+  
+  if self.sync == false then
+		_G.logger:info(" * Decoder and encoder have different number of layers. Bridging between them is thus not possible")
   end
  
 
@@ -107,7 +115,7 @@ function Seq2Seq:forwardComputeLoss(batch)
   local encoderStates, context = self.models.encoder:forward(batch)
   
   if self.sync == false then
-		encGradStatesOut = nil
+		encStates = nil
   end
   
   return self.models.decoder:computeLoss(batch, encoderStates, context, self.criterion)
