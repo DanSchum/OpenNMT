@@ -6,7 +6,8 @@ local options = {
   {'-src', '', [[Source sequence to decode (one line per sequence)]],
                {valid=onmt.utils.ExtendedCmdLine.nonEmpty}},
   {'-tgt', '', [[Nbest list for the target side]]},
-  {'-output', 'pred.txt', [[Path to output the new n_best list]]}
+  {'-output', 'pred.txt', [[Path to output the new n_best list]]},
+  {'-batch_size', 128, [[Number of sentences to group for faster computatation]]}
 }
 
 cmd:setCmdLineOptions(options, 'Data')
@@ -45,26 +46,7 @@ local function main()
 
   local predScoreTotal = 0
   local predWordsTotal = 0
-  --~ local goldScoreTotal = 0
-  --~ local goldWordsTotal = 0
-
-	-- First, dry-run to find the n-best list size
-	--~ local testReader = onmt.utils.FileReader.new(opt.tgt)
-	
-	--~ local nbestSize = 0
-	
-	--~ local startID = 0
-	--~ while true do
-		--~ local tgtTokens = testReader:next()
-		--~ local sentID = tgtTokens[1]
-		--~ if #tgtTokens > 0  and startID == 0 then
-			--~ nbestSize = nbestSize + 1
-		--~ else
-			--~ break
-		--~ end
-	--~ end
-	
-	--~ _G.logger:info(" N-best size detected: " .. nbestSize)
+  
 	
 	local rescorer = onmt.translate.Rescorer.new(opt, nbestSize)
 	
@@ -127,10 +109,10 @@ local function main()
 			
 			local currentHypId = tonumber(currentTgtTokens[1])
 			
-			-- end of last sentence -> proceed this batch
-			if currentHypId > hypID then
+			-- end of last sentence OR reach max batch size -> proceed this batch
+			if currentHypId > hypID or #tgtNBest > opt.batch_size then
 				
-				if hypID > -1 then
+				if hypID > -1  then
 					-- proceed this batch and print out result
 					local results = rescorer:rescore(srcSent, tgtNBest)
 					
@@ -150,79 +132,35 @@ local function main()
 					_G.logger:info('')
 				end
 				
-				-- build next batch
-				local srcTokens = srcReader:next()
-				srcSent = rescorer:buildInput(srcTokens)
-				tgtNBest = {tgtHyp}
-				tgtTokens = {currentTgtTokens}
-				
-				if hypID == -1 then 
-					hypID = currentHypId
+				if currentHypId > hypID then
+					-- build next batch
+					local srcTokens = srcReader:next()
+					srcSent = rescorer:buildInput(srcTokens)
+					tgtNBest = {tgtHyp}
+					tgtTokens = {currentTgtTokens}
+					
+					if hypID == -1 then 
+						hypID = currentHypId
+					else
+						hypID = hypID + 1
+					end
+					tgtOldResults = {oldScores}
 				else
-					hypID = hypID + 1
+					-- we just reached the mini batch limit
+					-- however our current sentenceID is not finished yet
+					tgtNBest = {tgtHyp}
+					tgtTokens = {currentTgtTokens}
+					tgtOldResults = {oldScores}
 				end
-				tgtOldResults = {oldScores}
 			else
+				-- keep building the current mini batch
 				table.insert(tgtNBest, tgtHyp)
 				table.insert(tgtOldResults, oldScores)
 				table.insert(tgtTokens, currentTgtTokens)
 			end
 		end
 	end
-  --~ while true do
-    --~ local nbestList = {}
-    --~ local srcTokens = srcReader:next()
     
-    --~ -- end of file
-    --~ if srcTokens == nil then
-			--~ break
-		--~ end
-    
-    --~ hypID = 
-		
-    --~ for n = 1, nbestSize do
-    --~ while true
-			--~ local currentTgtTokens = hypReader:next()
-			--~ currentHypId = currentTgtTokens[1]
-			--~ local currentHypScore = currentTgtTokens[#currentTgtTokens]
-			
-			--~ local sentTokens = {}
-			
-			--~ for i = 3, #currentTgtTokens - 2 do
-				--~ table.insert(sentTokens, currentTgtTokens[i])
-			--~ end
-			
-			--~ local sentence = rescorer:buildInput(sentTokens)
-			--~ table.insert(nbestList, sentence)
-    --~ end
-    
-    
-    --~ local srcSent = rescorer:buildInput(srcTokens)
-    
-    --~ local results = rescorer:rescore(srcSent, nbestList)
-    
-    
-    --~ for n = 1, nbestSize do
-			--~ local sentId = currentHypId
-			--~ local sentence = results[n].sent
-			--~ local score = results[n].score
-			
-			--~ local sentWithScore = string.format("%i ||| %s ||| %.2f", sentId, sentence, score)
-			
-			--~ outFile:write(sentWithScore .. '\n')
-			--~ _G.logger:info(sentWithScore)
-    --~ end
-    
-    --~ outFile:write('\n')
-    --~ _G.logger:info('')
-    
-    
-    --~ -- increase the current sentence by 1
-    --~ currentHypId = currentHypId + 1
-	
-
-  --~ end
-  
   outFile:close()
   _G.logger:shutDown()
 end
