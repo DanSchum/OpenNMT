@@ -70,7 +70,7 @@ local function main()
 				
 				
 				local oldSent = table.concat(tgtTokens[n], ' ')
-				local sentWithScore = string.format("%s %.2f", oldSent, score)
+				local sentWithScore = string.format("%s %.9f", oldSent, score)
 				
 				outFile:write(sentWithScore .. '\n')
 				_G.logger:info(sentWithScore)
@@ -123,7 +123,7 @@ local function main()
 						
 						
 						local oldSent = table.concat(tgtTokens[n], ' ')
-						local sentWithScore = string.format("%s %.2f", oldSent, score)
+						local sentWithScore = string.format("%s %.9f", oldSent, score)
 						outFile:write(sentWithScore .. '\n')
 						_G.logger:info(sentWithScore)
 					end

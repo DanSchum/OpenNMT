@@ -282,12 +282,13 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
     epochState:log()
 	
 		return epochState
-    --~ return epochState, epochProfiler:dump()
   end
   
   
 	
 	local bleuScore = evalBLEU(model, validData)
+	local ppl = eval(model, validData)
+	_G.logger:info('Initial perplexity: %.2f', ppl)
 	_G.logger:info('Initial Validation BLEU score: %.2f', bleuScore)
 	
   

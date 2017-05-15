@@ -1,14 +1,11 @@
 require('onmt.init')
 
-local cmd = onmt.utils.ExtendedCmdLine.new('rank_score.lua')
+local cmd = onmt.utils.ExtendedCmdLine.new('combine_score_nbest')
 
 local options = {
   {'-src', '', [[Source sequence to decode (one line per sequence)]]},
   {'-input', '', [[Nbest list for the target side]], {valid=onmt.utils.ExtendedCmdLine.nonEmpty}},
-  {'-output', 'pred.txt', [[Path to output the new n_best list]]},
-  {'-neg_weight', '1', [[Weight for negative scores]]},
-  {'-pos_weight', '1', [[Weight for positive scores]]},
-  {'-sub_weight', '0.5', [[Weight for scores after the first (original from n-best creator)]]}
+  {'-output', 'pred.txt', [[Path to output the new n_best list]]}
 }
 
 cmd:setCmdLineOptions(options, 'Data')
@@ -48,9 +45,9 @@ local function main()
 	local hypID = -1
 	local srcSent
 	local tgtNBest = {}
-	local scores = {}	
-
+	local scores = {}
 	
+	-- This local function processes the storage and combines the scores 
 	local function processBatch()
 		local listSize = #tgtNBest
 		local score = torch.DoubleTensor(listSize):zero()
@@ -61,33 +58,40 @@ local function main()
 				
 				-- Nematus score is negative
 				if tgtScores[n][m] > 0 then
-					tgtScores[n][m] = - tgtScores[n][m] * opt.pos_weight
-				else
-					tgtScores[n][m] = tgtScores[n][m] * opt.neg_weight
+					tgtScores[n][m] = - tgtScores[n][m] * 0.01
 				end
 				
 				if m > 1 then
-					tgtScores[n][m] = tgtScores[n][m] * opt.sub_weight
+					tgtScores[n][m] = tgtScores[n][m] * 0.5
 				end
 				
 				score[n] = score[n] + tgtScores[n][m]
 			end 
-			
-			local length = #tgtNBest[n]
 		end
 	
 	
 		-- sort (descending)
 		local sorted_score, sorted_id = torch.sort(score, 1, true) 
 		
-		local bestScore = score[sorted_id[1]]
-		local bestID = sorted_id[1]
-		local bestSentence = tgtNBest[bestID]
+		for n = 1, listSize do
+			
+			local id = sorted_id[n]
+			
+			local combinedScore = sorted_score[n]
+			
+			local sentence = tgtNBest[id]
+			
+			local sentID = tgtTokens[id][1]
+			
+			local sentWithScore = string.format("%s ||| %s ||| %.10f", sentID, sentence, combinedScore)
+			
+			_G.logger:info(sentWithScore)
+			outFile:write(sentWithScore .. "\n")
+		end
 		
-		local sentWithScore = string.format("%s : %.9f", bestSentence, bestScore)
-		_G.logger:info("BEST HYP: ")
-		_G.logger:info(sentWithScore)
-		outFile:write(bestSentence .. "\n")
+		_G.logger:info("")
+		
+		
 	
 	end
 	
@@ -97,7 +101,9 @@ local function main()
 		
 		-- end of file
     if currentTgtTokens == nil then
-			-- proceed this batch and print out result			
+			-- proceed this batch and print out result
+			--~ local results = rescorer:rescore(srcSent, tgtNBest)
+			
 			processBatch()
 			break
 		end
@@ -154,7 +160,7 @@ local function main()
 		
 		end
 
-		end
+	end
   
   outFile:close()
   _G.logger:shutDown()

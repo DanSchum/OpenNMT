@@ -115,7 +115,7 @@ function Seq2Seq:forwardComputeLoss(batch)
   local encoderStates, context = self.models.encoder:forward(batch)
   
   if self.sync == false then
-		encStates = nil
+		encoderStates = nil
   end
   
   return self.models.decoder:computeLoss(batch, encoderStates, context, self.criterion)

@@ -105,7 +105,7 @@ local function main()
 
           if withGoldScore then
             _G.logger:info('GOLD %d: %s', sentId, translator:buildOutput(goldBatch[b]), results[b].goldScore)
-            _G.logger:info("GOLD SCORE: %.2f", results[b].goldScore)
+            _G.logger:info("GOLD SCORE: %.9f", results[b].goldScore)
             goldScoreTotal = goldScoreTotal + results[b].goldScore
             goldWordsTotal = goldWordsTotal + #goldBatch[b].words
           end
@@ -125,14 +125,14 @@ local function main()
             end
 
             if opt.print_nbest == true then
-							local sentWithScore = string.format("%i ||| %s ||| %.2f", sentId, sentence, results[b].preds[n].score)
+							local sentWithScore = string.format("%i ||| %s ||| %.9f", sentId, sentence, results[b].preds[n].score)
 							outFile:write(sentWithScore .. '\n')
               _G.logger:info(sentWithScore)
             else
 							if n == 1 then
 								outFile:write(sentence .. '\n')
 								_G.logger:info("PRED %d: %s", sentId, sentence)
-								_G.logger:info("PRED SCORE: %.2f", results[b].preds[n].score)
+								_G.logger:info("PRED SCORE: %.9f", results[b].preds[n].score)
               end
             end
           end
