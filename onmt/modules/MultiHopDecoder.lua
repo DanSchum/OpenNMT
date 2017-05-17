@@ -197,9 +197,9 @@ function Decoder:_buildModel()
   local attnLayer
   
   if self.args.coverageSize == 0 then
-		attnLayer = onmt.GlobalAttention(self.args.rnnSize, self.args.attention)
+		attnLayer = onmt.GlobalAttention(self.args.rnnSize, self.args.rnnSize, self.args.attention)
   else
-	  attnLayer = onmt.CoverageAttention(self.args.rnnSize, self.args.coverageSize)
+	  attnLayer = onmt.CoverageAttention(self.args.rnnSize, self.args.rnnSize, self.args.coverageSize)
   end
   
   attnLayer.name = 'decoderAttn'

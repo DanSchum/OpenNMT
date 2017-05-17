@@ -14,7 +14,7 @@
 Inherits from [onmt.Sequencer](onmt+modules+Sequencer).
 
 --]]
-local Decoder, parent = torch.class('onmt.Decoder', 'onmt.Sequencer')
+local Decoder, parent = torch.class('onmt.CDecoder', 'onmt.Sequencer')
 
 
 --[[ Construct a decoder layer.
@@ -26,11 +26,12 @@ Parameters:
   * `generator` - optional, an output [onmt.Generator](onmt+modules+Generator).
   * `inputFeed` - bool, enable input feeding.
 --]]
-function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, contextGate, coverage)
+function Decoder:__init(inputNetwork, rnn, generator, attention, contextGate, coverage)
   self.rnn = rnn
   self.inputNet = inputNetwork
 
   self.args = {}
+  self.args.name = 'CDecoder'
   self.args.inputSize = self.rnn.inputSize
   self.args.rnnSize = self.rnn.outputSize
   self.args.numEffectiveLayers = self.rnn.numEffectiveLayers
@@ -41,9 +42,8 @@ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, cont
   -- Input feeding means the decoder takes an extra
   -- vector each time representing the attention at the
   -- previous step.
-  self.args.inputFeed = inputFeed
   self.args.coverageSize = coverage
-  self.args.contextGate = contextGate or false
+  self.args.contextGate = contextGate
   
   -- backward compatibility with older models
   if self.args.coverageSize == nil then 
@@ -51,7 +51,7 @@ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, cont
 	end
 	
 	if self.args.attention == nil then
-		self.args.attention = 'general'
+		self.args.attention = 'global'
 	end
   
   
@@ -77,11 +77,7 @@ function Decoder.load(pretrained)
   parent.__init(self, pretrained.modules[1])
   self.generator = pretrained.modules[2]
   self:add(self.generator)
-  
-  if self.args.inputFeed == true then
-		self.args.inputFeed = 1
-  end
-  
+
   self:resetPreallocation()
 
   return self
@@ -96,9 +92,6 @@ function Decoder:serialize()
 end
 
 function Decoder:resetPreallocation()
-  if self.args.inputFeed > 0 then
-    self.inputFeedProto = torch.Tensor()
-  end
   
   -- backward compatibility with older models
   if self.args.coverageSize == nil then
@@ -156,13 +149,6 @@ function Decoder:_buildModel()
   table.insert(inputs, context)
   self.args.inputIndex.context = #inputs
   
-  local inputFeed
-  if self.args.inputFeed > 0 then
-    inputFeed = nn.Identity()() -- batchSize x rnnSize
-    table.insert(inputs, inputFeed)
-    self.args.inputIndex.inputFeed = #inputs
-  end
-  
   local coverageVector
   if self.args.coverageSize > 0 then
 		_G.logger:info(" * Maintaining context coverage with GRU-based model ")
@@ -176,35 +162,32 @@ function Decoder:_buildModel()
   
   
   local input = embedding
-  -- If set, concatenate previous decoder output.
-  if self.args.inputFeed == 2 then
-    _G.logger:info(" * Input feeding using a GRU layer ")
-    input = onmt.GRUNode(self.args.inputSize, self.args.rnnSize)({inputFeed, input})
-    input = nn.Dropout(self.rnn.dropout)(input)
-  elseif self.args.inputFeed == 1 then
-		_G.logger:info(" * Input feeding using concatenation ")
-		input = nn.JoinTable(2)({input, inputFeed})
-  end
-  table.insert(states, input)
+
+  --~ table.insert(states, input)
 
   -- Forward states and input into the RNN.
-  local outputs = self.rnn(states)
+  --~ local outputs = self.rnn(states)
 
   -- The output of a subgraph is a node: split it to access the last RNN output.
   outputs = { outputs:split(self.args.numEffectiveLayers) }
 
   -- Compute the attention here using h^L as query.
+  
   local attnLayer
   
   if self.args.coverageSize == 0 then
-		attnLayer = onmt.GlobalAttention(self.args.rnnSize, self.args.attention)
+	  if self.args.attention == 'global' then
+			attnLayer = onmt.GlobalAttention(self.args.rnnSize, self.args.contextGate)
+	  elseif self.args.attention == 'mlp' then
+			_G.logger:info(" * Using MLP style attention layer")
+			attnLayer = onmt.GlobalMLPAttention(self.args.rnnSize, self.args.contextGate)
+	  end
   else
-	  attnLayer = onmt.CoverageAttention(self.args.rnnSize, self.args.coverageSize)
+	  attnLayer = onmt.CoverageAttention(self.args.rnnSize, self.args.contextGate)
   end
   
   attnLayer.name = 'decoderAttn'
   
-  local lstmHidden = outputs[#outputs]
   -- prepare input for the attention module
   local attnInput = {outputs[#outputs], context}
   if self.args.coverageSize > 0 then
@@ -213,41 +196,19 @@ function Decoder:_buildModel()
   
   local attnOutput = attnLayer(attnInput)
   
+  
   local nextCoverage
   if self.args.coverageSize > 0 then
-		attnOutput = {attnOutput:split(2)}
-		nextCoverage = attnOutput[2]
-		attnOutput = attnOutput[1]
-		table.insert(outputs, nextCoverage)
-  end
-  
-  local contextVector = attnOutput
-  
-  local contextCombined = nn.JoinTable(2)({contextVector, lstmHidden})
-  local finalHidden
-  if self.args.contextGate == false then
-		-- tanh layer combine context vector and hidden lstm layer ( Luong et al. 2015)
-		finalHidden = nn.Tanh()(nn.Linear(2 * self.args.rnnSize, self.args.rnnSize, false)(contextCombined))
-  else
-		_G.logger:info(" * Using soft context gate after attention ")
-		-- learning a soft gate to control contextVector and decoder hidden state
-		local contextGate = nn.Sigmoid()(nn.Linear(2 * self.args.rnnSize, self.args.rnnSize, true)(contextCombined))
-		local inputGate = nn.AddConstant(1,false)(nn.MulConstant(-1,false)(contextGate)) -- 1 - Gate
-		
-		local gatedContext = nn.CMulTable()({contextGate, contextVector})
-		local gatedInput   = nn.CMulTable()({inputGate, lstmHidden})
-		
-		local gatedContextCombined = nn.JoinTable(2)({gatedContext, gatedInput})
-		
-		finalHidden = nn.Tanh()(nn.Linear(2 * self.args.rnnSize, self.args.rnnSize, false)(gatedContextCombined))
+	attnOutput = {attnOutput:split(2)}
+	nextCoverage = attnOutput[2]
+	attnOutput = attnOutput[1]
+	table.insert(outputs, nextCoverage)
   end
   
   if self.rnn.dropout > 0 then
-    finalHidden = nn.Dropout(self.rnn.dropout)(finalHidden)
+    attnOutput = nn.Dropout(self.rnn.dropout)(attnOutput)
   end
-  
-  table.insert(outputs, finalHidden)
-  
+  table.insert(outputs, attnOutput)
   return nn.gModule(inputs, outputs)
 end
 
@@ -315,21 +276,12 @@ function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t
   else
     inputSize = input:size(1)
   end
-
-  if self.args.inputFeed > 0 then
-    if prevOut == nil then
-      table.insert(inputs, onmt.utils.Tensor.reuseTensor(self.inputFeedProto,
-                                                         { inputSize, self.args.rnnSize }))
-    else
-      table.insert(inputs, prevOut)
-    end
-  end
   
   if self.args.coverageSize > 0 then
-	if prevCoverage == nil then -- initialize the coverage vector as zero
-		prevCoverage = onmt.utils.Tensor.reuseTensor(self.coverageInputProto, {inputSize, context:size(2), self.args.coverageSize})
-	end
-	table.insert(inputs, prevCoverage)
+		if prevCoverage == nil then -- initialize the coverage vector as zero
+			prevCoverage = onmt.utils.Tensor.reuseTensor(self.coverageInputProto, {inputSize, context:size(2), self.args.coverageSize})
+		end
+		table.insert(inputs, prevCoverage)
   end
 
   -- Remember inputs for the backward pass.
@@ -350,9 +302,9 @@ function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t
   local nOutputs = 1
   local nextCoverage = nil
   if self.args.coverageSize > 0 then
-	nOutputs = 2
-	nextCoverage = outputs[#outputs - 1] -- update the coverage vector
-  end
+		nOutputs = 2
+		nextCoverage = outputs[#outputs - 1] -- update the coverage vector
+	end
   
   for i = 1, #outputs - nOutputs do
     table.insert(states, outputs[i])
@@ -476,11 +428,6 @@ function Decoder:backward(batch, outputs, criterion)
     gradContextInput:add(gradInput[self.args.inputIndex.context])
     gradStatesInput[#gradStatesInput]:zero()
 
-    -- Accumulate previous output gradients with input feeding gradients.
-    if self.args.inputFeed > 0 and t > 1 then
-      gradStatesInput[#gradStatesInput]:add(gradInput[self.args.inputIndex.inputFeed])
-    end
-    
     -- Accumulate previous coverage gradients
     if self.args.coverageSize > 0  then
 	  --~ gradStatesInput[#gradStatesInput-1]:zero()

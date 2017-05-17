@@ -37,6 +37,7 @@ function CoverageAttention:_buildModel(dim, coverageDim)
   table.insert(inputs, nn.Identity()()) -- previous hidden layer
   table.insert(inputs, nn.Identity()()) -- Context matrix batchL x sourceL x dim
   table.insert(inputs, nn.Identity()()) -- coverage vector batchL x sourceL x covDim
+  
 
   local targetT = nn.Linear(dim, dim, false)(inputs[1]) -- batchL x dim
   local context = inputs[2] -- batchL x sourceTimesteps x dim
@@ -44,8 +45,6 @@ function CoverageAttention:_buildModel(dim, coverageDim)
   local transformedCoverage = onmt.SequenceLinear(coverageDim, dim, false)(inputs[3]) -- no bias here 
   
   -- update the context matrix with the coverage vector
-  --~ local coveragedContext = nn.CAddTable()({context, transformedCoverage})
-  
   local transformedContext = onmt.SequenceLinear(dim, dim, false)(context)
   
   local repTargetT = nn.Replicate(1,2)(targetT)
@@ -68,23 +67,8 @@ function CoverageAttention:_buildModel(dim, coverageDim)
   -- Apply attention to context.
   local contextCombined = nn.MM()({attn, context}) -- batchL x 1 x dim
   local contextVector = nn.Sum(2)(contextCombined) -- batchL x dim
-  
-  contextCombined = nn.JoinTable(2)({contextVector, inputs[1]})
-  
-  -- Learn a gate to softly control the flow between context and dec hidden
-  local contextGate = nn.Sigmoid()(nn.Linear(dim*2, dim, true)(contextCombined))
-  local inputGate = nn.AddConstant(1,false)(nn.MulConstant(-1,false)(contextGate))
-  
-  local gatedContext = nn.CMulTable()({contextGate, contextVector})
-  local gatedInput   = nn.CMulTable()({inputGate, inputs[1]})
-  
-  local gatedContextCombined = nn.JoinTable(2)({gatedContext, gatedInput})
-  
-  local contextOutput = nn.Tanh()(nn.Linear(dim*2, dim, false)(gatedContextCombined))
-  
   -- Also reupdate the coverage vector
-  
   local newCoverage = onmt.ContextCoverage(dim, coverageDim)({inputs[3], inputs[2], alignmentVector})
 
-  return nn.gModule(inputs, {contextOutput, newCoverage})
+  return nn.gModule(inputs, {contextVector, newCoverage})
 end

@@ -136,9 +136,11 @@ function Encoder:forward(batch)
   local context = onmt.utils.Tensor.reuseTensor(self.contextProto,
                                                 { batch.size, batch.sourceLength, outputSize })
 
+	-- 
   if self.maskPad and not batch.sourceInputPadLeft then
     finalStates = onmt.utils.Tensor.recursiveClone(states)
   end
+  
   if self.train then
     self.inputs = {}
   end
@@ -164,10 +166,11 @@ function Encoder:forward(batch)
     -- Special case padding.
     if self.maskPad then
       for b = 1, batch.size do
-        if batch.sourceInputPadLeft and t <= batch.sourceLength - batch.sourceSize[b] then
-          for j = 1, #states do
-            states[j][b]:zero()
-          end
+        if (batch.sourceInputPadLeft and t <= batch.sourceLength - batch.sourceSize[b])
+					or (not batch.sourceInputPadLeft and t > batch.sourceSize[b]) then
+					for j = 1, #states do
+						states[j][b]:zero()
+					end
         elseif not batch.sourceInputPadLeft and t == batch.sourceSize[b] then
           for j = 1, #states do
             finalStates[j][b]:copy(states[j][b])
@@ -219,8 +222,11 @@ function Encoder:backward(batch, gradStatesOutput, gradContextOutput)
   for t = batch.sourceLength, 1, -1 do
     -- Add context gradients to last hidden states gradients.
     gradStatesInput[#gradStatesInput]:add(gradContextOutput[{{}, t}])
+    
+    -- nngraph does not accept table of size 1.
+		local timestepGradOutput = #gradStatesInput > 1 and gradStatesInput or gradStatesInput[1]
 
-    local gradInput = self:net(t):backward(self.inputs[t], gradStatesInput)
+    local gradInput = self:net(t):backward(self.inputs[t], timestepGradOutput)
 
     -- Prepare next encoder output gradients.
     for i = 1, #gradStatesInput do

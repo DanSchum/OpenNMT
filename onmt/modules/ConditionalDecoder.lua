@@ -14,10 +14,10 @@
 Inherits from [onmt.Sequencer](onmt+modules+Sequencer).
 
 --]]
-local ConditionalDecoder, parent = torch.class('onmt.ConditionalDecoder', 'onmt.Sequencer')
+local Decoder, parent = torch.class('onmt.ConditionalDecoder', 'onmt.Sequencer')
 
 
---[[ Construct a ConditionalDecoder layer.
+--[[ Construct a decoder layer.
 
 Parameters:
 
@@ -26,22 +26,28 @@ Parameters:
   * `generator` - optional, an output [onmt.Generator](onmt+modules+Generator).
   * `inputFeed` - bool, enable input feeding.
 --]]
-function ConditionalDecoder:__init(inputNetwork, rnn, generator, attention, inputFeed, coverage)
+function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, contextGate, coverage)
   self.rnn = rnn
   self.inputNet = inputNetwork
 
   self.args = {}
+  self.args.inputSize = self.rnn.inputSize
   self.args.rnnSize = self.rnn.outputSize
+  self.args.hiddenSize = self.rnn.outputSize
   self.args.numEffectiveLayers = self.rnn.numEffectiveLayers
+  self.args.layers = self.rnn.layers
+  self.args.dropout = self.rnn.dropout
 
   self.args.inputIndex = {}
   self.args.outputIndex = {}
 
-  -- Input feeding means the ConditionalDecoder takes an extra
+  -- Input feeding means the decoder takes an extra
   -- vector each time representing the attention at the
   -- previous step.
   self.args.inputFeed = inputFeed
-  self.args.coverageSize = coverage
+  --~ self.args.coverageSize = coverage
+  self.args.coverageSize = 0
+  self.args.contextGate = contextGate or false
   
   -- backward compatibility with older models
   if self.args.coverageSize == nil then 
@@ -49,7 +55,7 @@ function ConditionalDecoder:__init(inputNetwork, rnn, generator, attention, inpu
 	end
 	
 	if self.args.attention == nil then
-		self.args.attention = 'global'
+		self.args.attention = 'general'
 	end
   
   
@@ -58,7 +64,7 @@ function ConditionalDecoder:__init(inputNetwork, rnn, generator, attention, inpu
 
   parent.__init(self, self:_buildModel())
 
-  -- The generator use the output of the ConditionalDecoder sequencer to generate the
+  -- The generator use the output of the decoder sequencer to generate the
   -- likelihoods over the target vocabulary.
   self.generator = generator
   self:add(self.generator)
@@ -66,8 +72,8 @@ function ConditionalDecoder:__init(inputNetwork, rnn, generator, attention, inpu
   self:resetPreallocation()
 end
 
---[[ Return a new ConditionalDecoder using the serialized data `pretrained`. ]]
-function ConditionalDecoder.load(pretrained)
+--[[ Return a new Decoder using the serialized data `pretrained`. ]]
+function Decoder.load(pretrained)
   local self = torch.factory('onmt.ConditionalDecoder')()
 
   self.args = pretrained.args
@@ -75,22 +81,26 @@ function ConditionalDecoder.load(pretrained)
   parent.__init(self, pretrained.modules[1])
   self.generator = pretrained.modules[2]
   self:add(self.generator)
-
+  
+  if self.args.inputFeed == true then
+		self.args.inputFeed = 1
+  end
+  
   self:resetPreallocation()
 
   return self
 end
 
 --[[ Return data to serialize. ]]
-function ConditionalDecoder:serialize()
+function Decoder:serialize()
   return {
     modules = self.modules,
     args = self.args
   }
 end
 
-function ConditionalDecoder:resetPreallocation()
-  if self.args.inputFeed then
+function Decoder:resetPreallocation()
+  if self.args.inputFeed > 0 then
     self.inputFeedProto = torch.Tensor()
   end
   
@@ -118,7 +128,7 @@ function ConditionalDecoder:resetPreallocation()
   self.samplingProto = torch.Tensor()
 end
 
---[[ Build a default one time-step of the ConditionalDecoder
+--[[ Build a default one time-step of the decoder
 
 Returns: An nn-graph mapping
 
@@ -131,15 +141,13 @@ Returns: An nn-graph mapping
   ${if}$ is the input feeding, and
   ${a}$ is the context vector computed at this timestep.
 --]]
-function ConditionalDecoder:_buildModel()
+function Decoder:_buildModel()
   local inputs = {}
-  local states = {}
-
+	_G.logger:info(" * Building conditional decoder with multihop attention ")
   -- Inputs are previous layers first.
   for _ = 1, self.args.numEffectiveLayers do
     local h0 = nn.Identity()() -- batchSize x rnnSize
     table.insert(inputs, h0)
-    table.insert(states, h0)
   end
 
   local x = nn.Identity()() -- batchSize
@@ -151,74 +159,140 @@ function ConditionalDecoder:_buildModel()
   self.args.inputIndex.context = #inputs
   
   local inputFeed
-  if self.args.inputFeed then
+  if self.args.inputFeed > 0 then
     inputFeed = nn.Identity()() -- batchSize x rnnSize
     table.insert(inputs, inputFeed)
     self.args.inputIndex.inputFeed = #inputs
   end
   
-  local coverageVector
-  if self.args.coverageSize > 0 then
-	_G.logger:info(" * Maintaining context coverage with GRU-based model ")
-	coverageVector = nn.Identity()() -- batchSize x coverageSize
-	table.insert(inputs, coverageVector)
-	self.args.inputIndex.coverage = #inputs
-  end
+  
 
   -- Compute the input network.
   local embedding = self.inputNet(x)
   
   
   local input = embedding
-  -- If set, concatenate previous ConditionalDecoder output.
-  if self.args.inputFeed then
-    input = nn.JoinTable(2)({input, inputFeed})
-  end
-  table.insert(states, input)
-
-  -- Forward states and input into the RNN.
-  local outputs = self.rnn(states)
-
-  -- The output of a subgraph is a node: split it to access the last RNN output.
-  outputs = { outputs:split(self.args.numEffectiveLayers) }
-
-  -- Compute the attention here using h^L as query.
-  
-  local attnLayer
-  
-  if self.args.coverageSize == 0 then
-	  if self.args.attention == 'global' then
-		attnLayer = onmt.GlobalAttention(self.args.rnnSize)
-	  elseif self.args.attention == 'cgate' then
-		attnLayer = onmt.ContextGateAttention(self.args.rnnSize)
-	  end
-  else
-	  attnLayer = onmt.CoverageAttention(self.args.rnnSize, self.args.coverageSize)
+  -- If set, concatenate previous decoder output.
+  if self.args.inputFeed == 2 then
+    _G.logger:info(" * Input feeding using a GRU layer ")
+    input = onmt.GRUNode(self.args.inputSize, self.args.rnnSize)({inputFeed, input})
+    input = nn.Dropout(self.rnn.dropout)(input)
+  elseif self.args.inputFeed == 1 then
+		_G.logger:info(" * Input feeding using concatenation ")
+		input = nn.JoinTable(2)({input, inputFeed})
+		input = nn.Dropout(self.rnn.dropout)(input)
   end
   
-  attnLayer.name = 'ConditionalDecoderAttn'
+  -- From now we implement the conditional multihop LSTM
+  local outputs = {}
   
-  -- prepare input for the attention module
-  local attnInput = {outputs[#outputs], context}
-  if self.args.coverageSize > 0 then
-	table.insert(attnInput, coverageVector)
+  local prevHid = input
+  for L = 1, self.args.layers do
+		
+		local rnnInputs = {}
+		table.insert(rnnInputs, inputs[2*L - 1]) -- prevC at layer L
+		table.insert(rnnInputs, inputs[2*L    ]) -- prevH at layer L
+		table.insert(rnnInputs, prevHid) -- input at layer L
+		
+		-- RNN parameters
+		local inputSize 
+		if L == 1 then
+			inputSize = self.args.inputSize
+		else
+			inputSize = self.args.hiddenSize
+		end
+		local hiddenSize = self.args.hiddenSize
+		
+		-- dropout will be applied at the input of this time step
+		local dropout 
+		if L == 1 then dropout = 0
+		else dropout = self.args.dropout end
+		
+		local rnnOutputs = onmt.LSTMCell(inputSize, hiddenSize, dropout)(rnnInputs)
+		
+		rnnOutputs = { rnnOutputs:split(2) }
+		
+		for i = 1, 2 do
+			table.insert(outputs, rnnOutputs[i])
+		end
+		
+		local hidden = rnnOutputs[2]
+		
+		local attentionLayer = onmt.GlobalAttention(hiddenSize, self.args.attention)
+		attentionLayer.name = 'decoderAttn'
+		--~ 
+		local contextVector = attentionLayer({hidden, context})
+		
+		-- project the contextVector to the hidden space
+		--~ prevHid = nn.CAddTable()({hidden, nn.Linear(hiddenSize, hiddenSize)(contextVector)})
+		local contextCombined = nn.JoinTable(2)({contextVector, hidden})
+		-- perhaps we can use context gate here ?
+		
+		
+		prevHid =  nn.Tanh()(nn.Linear(2 * hiddenSize, hiddenSize, false)(contextCombined))
   end
   
-  local attnOutput = attnLayer(attnInput)
-  
-  
-  local nextCoverage
-  if self.args.coverageSize > 0 then
-	attnOutput = {attnOutput:split(2)}
-	nextCoverage = attnOutput[2]
-	attnOutput = attnOutput[1]
-	table.insert(outputs, nextCoverage)
-  end
+  local finalHidden = prevHid
   
   if self.rnn.dropout > 0 then
-    attnOutput = nn.Dropout(self.rnn.dropout)(attnOutput)
+    finalHidden = nn.Dropout(self.rnn.dropout)(finalHidden)
   end
-  table.insert(outputs, attnOutput)
+  --~ 
+  table.insert(outputs, finalHidden)
+
+  -- Forward states and input into the RNN.
+  --~ local outputs = self.rnn(states)
+
+  -- The output of a subgraph is a node: split it to access the last RNN output.
+  --~ outputs = { outputs:split(self.args.numEffectiveLayers) }
+
+  -- Compute the attention here using h^L as query.
+  --~ local attnLayer
+  
+  
+	--~ attnLayer = onmt.GlobalAttention(self.args.rnnSize, self.args.rnnSize, self.args.attention)
+  
+  --~ 
+  --~ attnLayer.name = 'decoderAttn'
+  --~ 
+  --~ local lstmHidden = outputs[#outputs]
+  --~ -- prepare input for the attention module
+  --~ local attnInput = {outputs[#outputs], context}
+  --~ if self.args.coverageSize > 0 then
+		--~ table.insert(attnInput, coverageVector)
+  --~ end
+  --~ 
+  --~ local attnOutput = attnLayer(attnInput)
+  --~ 
+  
+  
+  --~ local contextVector = attnOutput
+  --~ 
+  --~ local contextCombined = nn.JoinTable(2)({contextVector, lstmHidden})
+  --~ local finalHidden
+  --~ if self.args.contextGate == false then
+		--~ -- tanh layer combine context vector and hidden lstm layer ( Luong et al. 2015)
+		--~ finalHidden = nn.Tanh()(nn.Linear(2 * self.args.rnnSize, self.args.rnnSize, false)(contextCombined))
+  --~ else
+		--~ _G.logger:info(" * Using soft context gate after attention ")
+		--~ -- learning a soft gate to control contextVector and decoder hidden state
+		--~ local contextGate = nn.Sigmoid()(nn.Linear(2 * self.args.rnnSize, self.args.rnnSize, true)(contextCombined))
+		--~ local inputGate = nn.AddConstant(1,false)(nn.MulConstant(-1,false)(contextGate)) -- 1 - Gate
+		--~ 
+		--~ local gatedContext = nn.CMulTable()({contextGate, contextVector})
+		--~ local gatedInput   = nn.CMulTable()({inputGate, lstmHidden})
+		--~ 
+		--~ local gatedContextCombined = nn.JoinTable(2)({gatedContext, gatedInput})
+		--~ 
+		--~ finalHidden = nn.Tanh()(nn.Linear(2 * self.args.rnnSize, self.args.rnnSize, false)(gatedContextCombined))
+  --~ end
+  --~ 
+  --~ if self.rnn.dropout > 0 then
+    --~ finalHidden = nn.Dropout(self.rnn.dropout)(finalHidden)
+  --~ end
+  
+  --~ table.insert(outputs, finalHidden)
+  
   return nn.gModule(inputs, outputs)
 end
 
@@ -230,32 +304,49 @@ end
 
   * See  [onmt.MaskedSoftmax](onmt+modules+MaskedSoftmax).
 --]]
-function ConditionalDecoder:maskPadding(sourceSizes, sourceLength)
+function Decoder:maskPadding(sourceSizes, sourceLength)
+	
   if not self.decoderAttn then
     self.network:apply(function (layer)
       if layer.name == 'decoderAttn' then
-        self.decoderAttn = layer
+        layer:replace(function(module)
+					if module.name == 'softmaxAttn' then
+						local mod
+						if sourceSizes ~= nil then
+							mod = onmt.MaskedSoftmax(sourceSizes, sourceLength)
+						else
+							mod = nn.SoftMax()
+						end
+
+						mod.name = 'softmaxAttn'
+						mod:type(module._type)
+						self.softmaxAttn = mod
+						return mod
+					else
+						return module
+					end
+				end)
       end
     end)
   end
 
-  self.decoderAttn:replace(function(module)
-    if module.name == 'softmaxAttn' then
-      local mod
-      if sourceSizes ~= nil then
-        mod = onmt.MaskedSoftmax(sourceSizes, sourceLength)
-      else
-        mod = nn.SoftMax()
-      end
-
-      mod.name = 'softmaxAttn'
-      mod:type(module._type)
-      self.softmaxAttn = mod
-      return mod
-    else
-      return module
-    end
-  end)
+  --~ self.decoderAttn:replace(function(module)
+    --~ if module.name == 'softmaxAttn' then
+      --~ local mod
+      --~ if sourceSizes ~= nil then
+        --~ mod = onmt.MaskedSoftmax(sourceSizes, sourceLength)
+      --~ else
+        --~ mod = nn.SoftMax()
+      --~ end
+--~ 
+      --~ mod.name = 'softmaxAttn'
+      --~ mod:type(module._type)
+      --~ self.softmaxAttn = mod
+      --~ return mod
+    --~ else
+      --~ return module
+    --~ end
+  --~ end)
 end
 
 --[[ Run one step of the decoder.
@@ -273,7 +364,7 @@ Returns:
  1. `out` - Top-layer hidden state.
  2. `states` - All states.
 --]]
-function ConditionalDecoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t)
+function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t)
   local inputs = {}
 
   -- Create RNN input (see sequencer.lua `buildNetwork('dec')`).
@@ -287,7 +378,7 @@ function ConditionalDecoder:forwardOne(input, prevStates, context, prevOut, prev
     inputSize = input:size(1)
   end
 
-  if self.args.inputFeed then
+  if self.args.inputFeed > 0 then
     if prevOut == nil then
       table.insert(inputs, onmt.utils.Tensor.reuseTensor(self.inputFeedProto,
                                                          { inputSize, self.args.rnnSize }))
@@ -342,7 +433,7 @@ end
   * `func` - Calls `func(out, t)` each timestep.
 --]]
 
-function ConditionalDecoder:forwardAndApply(batch, encoderStates, context, func)
+function Decoder:forwardAndApply(batch, encoderStates, context, func)
   -- TODO: Make this a private method.
 
   if self.statesProto == nil then
@@ -371,7 +462,7 @@ end
 
   Returns: Table of top hidden state for each timestep.
 --]]
-function ConditionalDecoder:forward(batch, encoderStates, context)
+function Decoder:forward(batch, encoderStates, context)
   encoderStates = encoderStates
     or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
                                          onmt.utils.Cuda.convert(torch.Tensor()),
@@ -400,7 +491,7 @@ Parameters:
   Note: This code runs both the standard backward and criterion forward/backward.
   It returns both the gradInputs and the loss.
   -- ]]
-function ConditionalDecoder:backward(batch, outputs, criterion)
+function Decoder:backward(batch, outputs, criterion)
   if self.gradOutputsProto == nil then
     self.gradOutputsProto = onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
                                                               self.gradOutputProto,
@@ -448,7 +539,7 @@ function ConditionalDecoder:backward(batch, outputs, criterion)
     gradStatesInput[#gradStatesInput]:zero()
 
     -- Accumulate previous output gradients with input feeding gradients.
-    if self.args.inputFeed and t > 1 then
+    if self.args.inputFeed > 0 and t > 1 then
       gradStatesInput[#gradStatesInput]:add(gradInput[self.args.inputIndex.inputFeed])
     end
     
@@ -478,7 +569,7 @@ Parameters:
   * `criterion` - a pointwise criterion.
 
 --]]
-function ConditionalDecoder:computeLoss(batch, encoderStates, context, criterion)
+function Decoder:computeLoss(batch, encoderStates, context, criterion)
   encoderStates = encoderStates
     or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
                                          onmt.utils.Cuda.convert(torch.Tensor()),
@@ -504,7 +595,7 @@ Parameters:
   * `context` - the attention context.
 
 --]]
-function ConditionalDecoder:computeScore(batch, encoderStates, context)
+function Decoder:computeScore(batch, encoderStates, context)
   encoderStates = encoderStates
     or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
                                          onmt.utils.Cuda.convert(torch.Tensor()),
@@ -524,7 +615,7 @@ function ConditionalDecoder:computeScore(batch, encoderStates, context)
   return score
 end
 
-function ConditionalDecoder:sampleBatch(batch, encoderStates, context, maxLength, argmax)
+function Decoder:sampleBatch(batch, encoderStates, context, maxLength, argmax)
 	
 	maxLength = maxLength or onmt.Constants.MAX_TARGET_LENGTH
 	
@@ -540,6 +631,11 @@ function ConditionalDecoder:sampleBatch(batch, encoderStates, context, maxLength
                                                          self.stateProto,
                                                          { batch.size, self.args.rnnSize })
 	end
+	
+	encoderStates = encoderStates
+    or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
+                                         onmt.utils.Cuda.convert(torch.Tensor()),
+                                         { batch.size, self.args.rnnSize })
 	
 	local states = onmt.utils.Tensor.copyTensorTable(self.statesProto, encoderStates)
 	

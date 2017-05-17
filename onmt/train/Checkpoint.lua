@@ -32,6 +32,7 @@ function Checkpoint:save(filePath, info)
   }
 
   for k, v in pairs(self.model.models) do
+		v:clearState()
     if v.serialize then
       data.models[k] = v:serialize()
     else
@@ -95,6 +96,7 @@ function Checkpoint.loadFromCheckpoint(opt)
 		opt.coverage = checkpoint.options.coverage
 		opt.attention = checkpoint.options.attention
 		opt.dropout = checkpoint.options.dropout
+		opt.cgate = checkpoints.options.cgate 
 
     -- Resume training from checkpoint
     if opt.continue then

@@ -1,4 +1,4 @@
-	local function reverseInput(batch)
+local function reverseInput(batch)
   batch.sourceInput, batch.sourceInputRev = batch.sourceInputRev, batch.sourceInput
   batch.sourceInputFeatures, batch.sourceInputRevFeatures = batch.sourceInputRevFeatures, batch.sourceInputFeatures
   batch.sourceInputPadLeft, batch.sourceInputRevPadLeft = batch.sourceInputRevPadLeft, batch.sourceInputPadLeft
@@ -32,7 +32,7 @@ end
 Inherits from [onmt.Sequencer](onmt+modules+Sequencer).
 
 --]]
-local BiEncoder, parent = torch.class('onmt.BiEncoder', 'nn.Container')
+local BiEncoder, parent = torch.class('onmt.BiEncoderFast', 'nn.Container')
 
 --[[ Create a bi-encoder.
 
@@ -47,6 +47,7 @@ function BiEncoder:__init(input, rnn, merge)
 
   self.fwd = onmt.Encoder.new(input, rnn)
   self.bwd = onmt.Encoder.new(input:clone('weight', 'bias', 'gradWeight', 'gradBias'), rnn:clone())
+  self.wordEmb = input:clone('weight', 'bias', 'gradWeight', 'gradBias')
 
   self.args = {}
   self.args.merge = merge
@@ -63,22 +64,31 @@ function BiEncoder:__init(input, rnn, merge)
 
   self:add(self.fwd)
   self:add(self.bwd)
+  self:add(self.wordEmb)
+  
+  self.contextMerger = self:_buildContextMerger()
+  self.stateMerger = self:_buildStateMerger()
 
+	self:add(self.contextMerger)
   self:resetPreallocation()
 end
 
 --[[ Return a new BiEncoder using the serialized data `pretrained`. ]]
 function BiEncoder.load(pretrained)
-  local self = torch.factory('onmt.BiEncoder')()
+  local self = torch.factory('onmt.BiEncoderFast')()
 
   parent.__init(self)
 
   self.fwd = onmt.Encoder.load(pretrained.modules[1])
   self.bwd = onmt.Encoder.load(pretrained.modules[2])
+  self.contextMerger = pretrained.modules[3]
+  self.stateMerger = pretrained.modules[3]
   self.args = pretrained.args
 
   self:add(self.fwd)
   self:add(self.bwd)
+  self:add(self.contextMerger)
+  self:add(self.stateMerger)
 
   self:resetPreallocation()
 
@@ -89,11 +99,15 @@ end
 function BiEncoder:serialize()
   local modulesData = {}
   for i = 1, #self.modules do
-    table.insert(modulesData, self.modules[i]:serialize())
+		if self.modules[i].serialize then
+			table.insert(modulesData, self.modules[i]:serialize())
+		else
+			table.insert(modulesData, self.modules[i])
+		end
   end
 
   return {
-    name = 'BiEncoder',
+    name = 'BiEncoderFast',
     modules = modulesData,
     args = self.args
   }
@@ -110,6 +124,55 @@ function BiEncoder:resetPreallocation()
   self.gradContextBwdProto = torch.Tensor()
 end
 
+-- we will build a merging module for the fwd and bwd 
+function BiEncoder:_buildContextMerger()
+
+	_G.logger:info(' * Using a nn module to merge the forward and backward encoder contexts')
+	local paraTable = nn.ParallelTable()
+	paraTable:add(nn.Identity()) -- for the fwdContext
+	
+	paraTable:add(nn.Reverse(2, true)) -- reverse the backward context, so the states are 'aligned'
+	
+	local contextMerger = nn.Sequential():add(paraTable)
+	local mergeModule
+	if self.args.merge == 'concat' then
+		mergeModule = nn.JoinTable(2, 2)
+	else
+		mergeModule = nn.CAddTable()
+	end
+	
+	contextMerger:add(mergeModule)
+	
+	return contextMerger
+end
+
+function BiEncoder:_buildStateMerger()
+	
+	_G.logger:info(' * Using a nn module to merge the forward and backward encoder states')
+	
+	local zipTable = nn.ZipTable()
+	
+	local paraTable = nn.ParallelTable()
+	
+	for i = 1, self.args.numEffectiveLayers do
+		
+		local mergeModule
+		if self.args.merge == 'concat' then
+			mergeModule = nn.JoinTable(2, 2)
+		else
+			mergeModule = nn.CAddTable()
+		end
+		
+		paraTable:add(mergeModule)
+	end
+	
+	local stateMerger = nn.Sequential()
+	stateMerger:add(zipTable)
+	stateMerger:add(paraTable)
+	
+	return stateMerger
+end
+
 function BiEncoder:maskPadding()
   self.fwd:maskPadding()
   self.bwd:maskPadding()
@@ -121,38 +184,41 @@ function BiEncoder:forward(batch)
                                                          self.stateProto,
                                                          { batch.size, self.args.hiddenSize })
   end
+  
+  self.buffers = {}
 
   local states = onmt.utils.Tensor.reuseTensorTable(self.statesProto, { batch.size, self.args.hiddenSize })
-  local context = onmt.utils.Tensor.reuseTensor(self.contextProto,
-                                                { batch.size, batch.sourceLength, self.args.hiddenSize })
 
   local fwdStates, fwdContext = self.fwd:forward(batch)
   reverseInput(batch)
   local bwdStates, bwdContext = self.bwd:forward(batch)
   reverseInput(batch)
 
-  if self.args.merge == 'concat' then
-    for i = 1, #fwdStates do
-      states[i]:narrow(2, 1, self.args.rnnSize):copy(fwdStates[i])
-      states[i]:narrow(2, self.args.rnnSize + 1, self.args.rnnSize):copy(bwdStates[i])
-    end
-    for t = 1, batch.sourceLength do
-      context[{{}, t}]:narrow(2, 1, self.args.rnnSize)
-        :copy(fwdContext[{{}, t}])
-      context[{{}, t}]:narrow(2, self.args.rnnSize + 1, self.args.rnnSize)
-        :copy(bwdContext[{{}, batch.sourceLength - t + 1}])
-    end
-  elseif self.args.merge == 'sum' then
-    for i = 1, #states do
-      states[i]:copy(fwdStates[i])
-      states[i]:add(bwdStates[i])
-    end
-    for t = 1, batch.sourceLength do
-      context[{{}, t}]:copy(fwdContext[{{}, t}])
-      context[{{}, t}]:add(bwdContext[{{}, batch.sourceLength - t + 1}])
-    end
-  end
-
+  --~ if self.args.merge == 'concat' then
+    --~ for i = 1, #fwdStates do
+      --~ states[i]:narrow(2, 1, self.args.rnnSize):copy(fwdStates[i])
+      --~ states[i]:narrow(2, self.args.rnnSize + 1, self.args.rnnSize):copy(bwdStates[i])
+    --~ end
+    --~ 
+  --~ elseif self.args.merge == 'sum' then
+    --~ for i = 1, #states do
+      --~ states[i]:copy(fwdStates[i])
+      --~ states[i]:add(bwdStates[i])
+    --~ end
+    --~ 
+  --~ end
+  
+  local contextMergerInput = {fwdContext, bwdContext}
+  local stateMergerInput = {fwdStates, bwdStates}
+  
+  if self.train then
+		self.contextMergerInput = contextMergerInput
+		self.stateMergerInput = stateMergerInput
+	end
+  
+  local context = self.contextMerger:forward(contextMergerInput)
+  local states = self.stateMerger:forward(stateMergerInput)
+  
   return states, context
 end
 
@@ -165,42 +231,43 @@ function BiEncoder:backward(batch, gradStatesOutput, gradContextOutput)
   local gradContextOutputFwd
   local gradContextOutputBwd
 
-  local gradStatesOutputFwd = {}
-  local gradStatesOutputBwd = {}
+  local gradStatesOutputFwd
+  local gradStatesOutputBwd
 
-  if self.args.merge == 'concat' then
-    local gradContextOutputSplit = gradContextOutput:chunk(2, 3)
-    gradContextOutputFwd = gradContextOutputSplit[1]
-    gradContextOutputBwd = gradContextOutputSplit[2]
-
-    for i = 1, #gradStatesOutput do
-      local statesSplit = gradStatesOutput[i]:chunk(2, 2)
-      table.insert(gradStatesOutputFwd, statesSplit[1])
-      table.insert(gradStatesOutputBwd, statesSplit[2])
-    end
-  elseif self.args.merge == 'sum' then
-    gradContextOutputFwd = gradContextOutput
-    gradContextOutputBwd = gradContextOutput
-
-    gradStatesOutputFwd = gradStatesOutput
-    gradStatesOutputBwd = gradStatesOutput
-  end
-
+  --~ if self.args.merge == 'concat' then
+--~ 
+    --~ for i = 1, #gradStatesOutput do
+      --~ local statesSplit = gradStatesOutput[i]:chunk(2, 2)
+      --~ table.insert(gradStatesOutputFwd, statesSplit[1])
+      --~ table.insert(gradStatesOutputBwd, statesSplit[2])
+    --~ end
+  --~ elseif self.args.merge == 'sum' then
+--~ 
+    --~ gradStatesOutputFwd = gradStatesOutput
+    --~ gradStatesOutputBwd = gradStatesOutput
+  --~ end
+  
+  --backward pass for the merger 
+  local gradContext = self.contextMerger:backward(self.contextMergerInput, gradContextOutput)
+  gradContextOutputFwd = gradContext[1]
+  gradContextOutputBwd = gradContext[2]
+  
+  local gradStates = self.stateMerger:backward(self.stateMergerInput, gradStatesOutput)
+  gradStatesOutputFwd = gradStates[1]
+  gradStatesOutputBwd = gradStates[2]
+  
+	-- backward pass for the forward encoder
   local gradInputFwd = self.fwd:backward(batch, gradStatesOutputFwd, gradContextOutputFwd)
-
-  -- reverse gradients of the backward context
-  local gradContextBwd = onmt.utils.Tensor.reuseTensor(self.gradContextBwdProto,
-                                                       { batch.size, batch.sourceLength, self.args.rnnSize })
-
-  for t = 1, batch.sourceLength do
-    gradContextBwd[{{}, t}]:copy(gradContextOutputBwd[{{}, batch.sourceLength - t + 1}])
-  end
-
-  local gradInputBwd = self.bwd:backward(batch, gradStatesOutputBwd, gradContextBwd)
+  --~ 
+	
+	-- backward pass for the backward encoder
+  local gradInputBwd = self.bwd:backward(batch, gradStatesOutputBwd, gradContextOutputBwd)
 
   for t = 1, batch.sourceLength do
     onmt.utils.Tensor.recursiveAdd(gradInputFwd[t], gradInputBwd[batch.sourceLength - t + 1])
   end
+  
+  self.contextMergerInput = nil
 
   return gradInputFwd
 end

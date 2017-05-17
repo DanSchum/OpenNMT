@@ -218,6 +218,19 @@ function Batch:getSourceInput(t)
   return inputs
 end
 
+--[[ Get source input REVERSED at timestep `t`. --]]
+function Batch:getSourceInputRev(t)
+  -- If a regular input, return word id, otherwise a table with features.
+  local inputs = self.sourceInputRev[t]
+
+  if #self.sourceInputRevFeatures > 0 then
+    inputs = { inputs }
+    addInputFeatures(inputs, self.sourceInputRevFeatures, t)
+  end
+
+  return inputs
+end
+
 --[[ Get target input batch at timestep `t`. --]]
 function Batch:getTargetInput(t)
   -- If a regular input, return word id, otherwise a table with features.

@@ -116,7 +116,10 @@ function Factory.buildEncoder(opt, inputNetwork)
 
     local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, rnnSize, opt.dropout, opt.residual, opt.dropout_input)
 
-    encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt.brnn_merge)
+    encoder = onmt.BiEncoderFast.new(inputNetwork, rnn, opt.brnn_merge)
+    --~ encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt.brnn_merge)
+    
+    
   else
     local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, opt.rnn_size, opt.dropout, opt.residual, opt.dropout_input)
 
@@ -148,7 +151,7 @@ function Factory.loadEncoder(pretrained, clone)
   -- Keep for backward compatibility.
   local brnn = #pretrained.modules == 2
   if brnn then
-    return onmt.BiEncoder.load(pretrained)
+    return onmt.BiEncoderFast.load(pretrained)
   else
     return onmt.Encoder.load(pretrained)
   end
@@ -166,15 +169,31 @@ function Factory.buildDecoder(opt, inputNetwork, generator, verbose)
   if opt.rnn_type == 'GRU' then
     RNN = onmt.GRU
   end
-  local rnn = RNN.new(opt.layers, inputSize, opt.rnn_size, opt.dropout, opt.residual, opt.dropout_input)
+  local rnn 
+  
+  if opt.conditional ~= true then
+		rnn = RNN.new(opt.layers, inputSize, opt.rnn_size, opt.dropout, opt.residual, opt.dropout_input)
+  else
+		rnn = {}
+		rnn.layers = opt.layers
+		rnn.inputSize = inputSize
+		rnn.outputSize = opt.rnn_size
+		rnn.dropout = opt.dropout
+		rnn.numEffectiveLayers = 2 * opt.layers
+  end
   
   if opt.attention == 'cgate' then
     if verbose then
       _G.logger:info(' * using context gate attention')
     end
   end
-
-  return onmt.Decoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.coverage)
+  
+  -- To use a conditional decoder
+  if opt.conditional then
+		return onmt.ConditionalDecoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.cgate, opt.coverage)
+  end
+	
+  return onmt.Decoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.cgate, opt.coverage)
 end
 
 function Factory.buildWordDecoder(opt, dicts, verbose)
@@ -182,7 +201,8 @@ function Factory.buildWordDecoder(opt, dicts, verbose)
                                          opt.tgt_word_vec_size or opt.word_vec_size,
                                          opt.pre_word_vecs_dec, opt.fix_word_vecs_dec)
 
-  local generator = Factory.buildGenerator(opt.rnn_size, dicts)
+	local outputSize = inputNetwork.inputSize
+  local generator = Factory.buildGenerator(outputSize, dicts)
   
   -- tieing the weights if chosen
   if opt.tie_embedding == true then
@@ -213,7 +233,11 @@ function Factory.loadDecoder(pretrained, clone)
   if clone then
     pretrained = onmt.utils.Tensor.deepClone(pretrained)
   end
-
+	
+	if pretrained.args.name and pretrained.args.name == 'ConditionalDecoder' then
+		return onmt.ConditionalDecoder.load(pretrained)
+	end
+	
   return onmt.Decoder.load(pretrained)
 end
 

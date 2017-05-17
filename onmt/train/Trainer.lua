@@ -130,7 +130,9 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 		local currentEpoch = self.args.start_epoch
 		local epochState = onmt.train.EpochState.new(currentEpoch, startI, numIterationsPerEpoch, optim:getLearningRate())
 		
+		self.args.save_every = math.min(numIterationsPerEpoch, self.args.save_every)
 		assert(self.args.save_every > 0, "model must be evaluated after a number of iterations")
+		
 		
 		local function validAndSave()
 			_G.logger:info('')
@@ -246,9 +248,6 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 			totalSize = batch.size
 			
 			local losses = {}
-			
-			--~ _G.profiler = onmt.utils.Profiler.new(doProfile)
-			
 			_G.batch = batch
 			
 			onmt.utils.Cuda.convert(_G.batch)
@@ -267,8 +266,6 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 				epochState:log(iter)
 			end
 			
-			
-					
 			if self.args.save_every > 0 and iter % self.args.save_every == 0 then
 				--~ checkpoint:saveIteration(iter, epochState, batchOrder, true)
 				--~ checkpoint:saveIteration(iter, numIterations, epochState, batchOrder, 9999, 0, true)
