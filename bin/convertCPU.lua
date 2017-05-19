@@ -11,7 +11,9 @@ local modelClass = onmt.ModelSelector(modelType)
 local options = {
   {'-save_model', '', [[Model filename (the model will be saved as
                             <save_model>_epochN_PPL.t7 where PPL is the validation perplexity]],
-                      {valid=onmt.utils.ExtendedCmdLine.nonEmpty}}
+                      {valid=onmt.utils.ExtendedCmdLine.nonEmpty}},
+  {'-keep_grad', 1, [[Keep the gradient parameters or not. Default = 1]],
+                      }
 }
 cmd:setCmdLineOptions(options, 'Data')
 
@@ -31,7 +33,7 @@ cmd:option('-seed', 3435, [[Seed for random initialization]], {valid=onmt.utils.
 
 local opt = cmd:parse(arg)
 
-local function releaseModel(model, tensorCache)
+local function releaseModel(model, keepGrad, tensorCache)
   tensorCache = tensorCache or {}
   for _, submodule in pairs(model.modules) do
     if torch.type(submodule) == 'table' and submodule.modules then
@@ -40,7 +42,9 @@ local function releaseModel(model, tensorCache)
       submodule:float(tensorCache)
       submodule:clearState()
       submodule:apply(function (m)
-        nn.utils.clear(m, 'gradWeight', 'gradBias')
+				if keepGrad == false then
+					nn.utils.clear(m, 'gradWeight', 'gradBias')
+        end
         for k, v in pairs(m) do
           if type(v) == 'function' then
             m[k] = nil
@@ -109,7 +113,7 @@ local function main()
   -- some of the information of the info is CudaTensor so get rid of it
   checkpoint.info = nil
   for _, model in pairs(checkpoint.models) do
-    releaseModel(model)
+    releaseModel(model, opt.keep_grad == 1)
   end
   
   _G.logger:info('... done.')
