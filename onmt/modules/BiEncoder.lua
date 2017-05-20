@@ -1,4 +1,4 @@
-	local function reverseInput(batch)
+local function reverseInput(batch)
   batch.sourceInput, batch.sourceInputRev = batch.sourceInputRev, batch.sourceInput
   batch.sourceInputFeatures, batch.sourceInputRevFeatures = batch.sourceInputRevFeatures, batch.sourceInputFeatures
   batch.sourceInputPadLeft, batch.sourceInputRevPadLeft = batch.sourceInputRevPadLeft, batch.sourceInputPadLeft
@@ -42,11 +42,12 @@ Parameters:
   * `rnn` - recurrent template module.
   * `merge` - fwd/bwd merge operation {"concat", "sum"}
 ]]
-function BiEncoder:__init(input, rnn, merge)
+function BiEncoder:__init(input, rnn, merge, bridge, nDecLayers)
   parent.__init(self)
 
   self.fwd = onmt.Encoder.new(input, rnn)
   self.bwd = onmt.Encoder.new(input:clone('weight', 'bias', 'gradWeight', 'gradBias'), rnn:clone())
+  self.wordEmb = input:clone('weight', 'bias', 'gradWeight', 'gradBias')
 
   self.args = {}
   self.args.merge = merge
@@ -54,6 +55,9 @@ function BiEncoder:__init(input, rnn, merge)
   self.args.rnnSize = rnn.outputSize
   self.args.numEffectiveLayers = rnn.numEffectiveLayers
   self.args.layers = rnn.layers
+  self.args.bridge = bridge
+  
+  self.args.nDecLayers = nDecLayers or self.args.numEffectiveLayers 
 
   if self.args.merge == 'concat' then
     self.args.hiddenSize = self.args.rnnSize * 2
@@ -63,7 +67,15 @@ function BiEncoder:__init(input, rnn, merge)
 
   self:add(self.fwd)
   self:add(self.bwd)
+  self:add(self.wordEmb)
+  
+  self.contextMerger = self:_buildContextMerger()
+  self.stateMerger = self:_buildStateMerger()
+  self.bridge = self:_buildBridge()
 
+	self:add(self.contextMerger)
+	self:add(self.stateMerger)
+	self:add(self.bridge)
   self:resetPreallocation()
 end
 
@@ -75,10 +87,32 @@ function BiEncoder.load(pretrained)
 
   self.fwd = onmt.Encoder.load(pretrained.modules[1])
   self.bwd = onmt.Encoder.load(pretrained.modules[2])
+  self.contextMerger = pretrained.modules[3]
+  self.stateMerger = pretrained.modules[4]
+  self.bridge      = pretrained.modules[5]
   self.args = pretrained.args
+  
+  -- backward compatibility with old models
+  self.args.nDecLayers = self.args.nDecLayers or self.args.numEffectiveLayers 
+  
+  if self.contextMerger == nil then
+		self.contextMerger = self:_buildContextMerger()
+  end
+  
+  if self.stateMerger == nil then
+		self.stateMerger = self:_buildStateMerger()
+  end
+  
+  if self.bridge == nil then
+		self.args.bridge = 'copy'
+		self.bridge = self:_buildBridge()
+  end
 
   self:add(self.fwd)
   self:add(self.bwd)
+  self:add(self.contextMerger)
+  self:add(self.stateMerger)
+  self:add(self.bridge)
 
   self:resetPreallocation()
 
@@ -89,7 +123,11 @@ end
 function BiEncoder:serialize()
   local modulesData = {}
   for i = 1, #self.modules do
-    table.insert(modulesData, self.modules[i]:serialize())
+		if self.modules[i].serialize then
+			table.insert(modulesData, self.modules[i]:serialize())
+		else
+			table.insert(modulesData, self.modules[i])
+		end
   end
 
   return {
@@ -110,97 +148,153 @@ function BiEncoder:resetPreallocation()
   self.gradContextBwdProto = torch.Tensor()
 end
 
+-- we will build a merging module for the fwd and bwd 
+function BiEncoder:_buildContextMerger()
+
+	
+	local paraTable = nn.ParallelTable()
+	paraTable:add(nn.Identity()) -- for the fwdContext
+	
+	paraTable:add(nn.Reverse(2, true)) -- reverse the backward context, so the states are 'aligned'
+	
+	local contextMerger = nn.Sequential():add(paraTable)
+	local mergeModule
+	if self.args.merge == 'concat' then
+		_G.logger:info(' * Merging the forward and backward encoder contexts by concatenation')
+		mergeModule = nn.JoinTable(2, 2)
+	else
+		_G.logger:info(' * Merging the forward and backward encoder contexts by sum')
+		mergeModule = nn.CAddTable()
+	end
+	
+	contextMerger:add(mergeModule)
+	
+	return contextMerger
+end
+
+function BiEncoder:_buildStateMerger()
+	
+	
+	
+	local zipTable = nn.ZipTable()
+	
+	local paraTable = nn.ParallelTable()
+	
+	-- for each layer, we merge the cell and the hidden state of the LSTM from fwd and bwd
+	for i = 1, self.args.numEffectiveLayers do
+		
+		local mergeModule
+		if self.args.merge == 'concat' then
+			mergeModule = nn.JoinTable(2, 2)
+		else
+			mergeModule = nn.CAddTable()
+		end
+		
+		paraTable:add(mergeModule)
+	end
+	
+	local stateMerger = nn.Sequential()
+	stateMerger:add(zipTable)
+	stateMerger:add(paraTable)
+	
+	return stateMerger
+end
+
+function BiEncoder:_buildBridge()
+	
+	local bridge
+	if self.args.bridge == 'copy' then
+		_G.logger:info(" * Identity bridge between encoder and decoder hidden states")
+		bridge = nn.MapTable(nn.Identity())
+	elseif self.args.bridge == 'affine' then
+		_G.logger:info(" * Non-linear affine transformation between encoder and decoder hidden states")
+		bridge = nn.Sequential()
+			:add(nn.JoinTable(2))
+		bridge:add(nn.Linear(self.args.hiddenSize * self.args.numEffectiveLayers, self.args.hiddenSize * self.args.nDecLayers, false))
+		bridge:add(nn.Tanh())
+		bridge:add(nn.View(-1, self.args.nDecLayers, self.args.hiddenSize))
+		bridge:add(nn.SplitTable(2))
+	elseif self.args.bridge == 'nil' then
+		_G.logger:info(" * No bridge between encoder and decoder hidden states")
+		bridge = nn.NilModule() -- mapping output to nil, and gradInput to nil
+	else
+		error("Bridge type not implemented")
+	end
+	
+	return bridge
+end
+
 function BiEncoder:maskPadding()
   self.fwd:maskPadding()
   self.bwd:maskPadding()
 end
 
 function BiEncoder:forward(batch)
-  if self.statesProto == nil then
-    self.statesProto = onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
-                                                         self.stateProto,
-                                                         { batch.size, self.args.hiddenSize })
-  end
-
-  local states = onmt.utils.Tensor.reuseTensorTable(self.statesProto, { batch.size, self.args.hiddenSize })
-  local context = onmt.utils.Tensor.reuseTensor(self.contextProto,
-                                                { batch.size, batch.sourceLength, self.args.hiddenSize })
-
+  
+  self.buffers = {}
+	-- First, run forward pass for the two directional recurrent encoders
   local fwdStates, fwdContext = self.fwd:forward(batch)
   reverseInput(batch)
   local bwdStates, bwdContext = self.bwd:forward(batch)
   reverseInput(batch)
-
-  if self.args.merge == 'concat' then
-    for i = 1, #fwdStates do
-      states[i]:narrow(2, 1, self.args.rnnSize):copy(fwdStates[i])
-      states[i]:narrow(2, self.args.rnnSize + 1, self.args.rnnSize):copy(bwdStates[i])
-    end
-    for t = 1, batch.sourceLength do
-      context[{{}, t}]:narrow(2, 1, self.args.rnnSize)
-        :copy(fwdContext[{{}, t}])
-      context[{{}, t}]:narrow(2, self.args.rnnSize + 1, self.args.rnnSize)
-        :copy(bwdContext[{{}, batch.sourceLength - t + 1}])
-    end
-  elseif self.args.merge == 'sum' then
-    for i = 1, #states do
-      states[i]:copy(fwdStates[i])
-      states[i]:add(bwdStates[i])
-    end
-    for t = 1, batch.sourceLength do
-      context[{{}, t}]:copy(fwdContext[{{}, t}])
-      context[{{}, t}]:add(bwdContext[{{}, batch.sourceLength - t + 1}])
-    end
-  end
-
+  
+  -- Second, merge them using the mergers
+  local contextMergerInput = {fwdContext, bwdContext}
+  local stateMergerInput = {fwdStates, bwdStates}
+  
+  
+  
+  local context = self.contextMerger:forward(contextMergerInput)
+  local encOutStates = self.stateMerger:forward(stateMergerInput)
+  
+  local states = self.bridge:forward(encOutStates)
+  
+  -- Store input during training for the backward pass
+  if self.train then
+		self.contextMergerInput = contextMergerInput
+		self.stateMergerInput = stateMergerInput
+		self.bridgeInput = encOutStates
+	end
+  
   return states, context
 end
 
-function BiEncoder:backward(batch, gradStatesOutput, gradContextOutput)
-  gradStatesOutput = gradStatesOutput
-    or onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
-                                         onmt.utils.Cuda.convert(torch.Tensor()),
-                                         { batch.size, self.args.hiddenSize })
+function BiEncoder:backward(batch, gradBridgeStatesOutput, gradContextOutput)
 
   local gradContextOutputFwd
   local gradContextOutputBwd
 
-  local gradStatesOutputFwd = {}
-  local gradStatesOutputBwd = {}
-
-  if self.args.merge == 'concat' then
-    local gradContextOutputSplit = gradContextOutput:chunk(2, 3)
-    gradContextOutputFwd = gradContextOutputSplit[1]
-    gradContextOutputBwd = gradContextOutputSplit[2]
-
-    for i = 1, #gradStatesOutput do
-      local statesSplit = gradStatesOutput[i]:chunk(2, 2)
-      table.insert(gradStatesOutputFwd, statesSplit[1])
-      table.insert(gradStatesOutputBwd, statesSplit[2])
-    end
-  elseif self.args.merge == 'sum' then
-    gradContextOutputFwd = gradContextOutput
-    gradContextOutputBwd = gradContextOutput
-
-    gradStatesOutputFwd = gradStatesOutput
-    gradStatesOutputBwd = gradStatesOutput
+  local gradStatesOutputFwd
+  local gradStatesOutputBwd
+  
+  --backward pass from the bridge
+  local gradStatesOutput = self.bridge:backward(self.bridgeInput, gradBridgeStatesOutput)
+  
+  --backward pass for the context merger 
+  local gradContext = self.contextMerger:backward(self.contextMergerInput, gradContextOutput)
+  gradContextOutputFwd = gradContext[1]
+  gradContextOutputBwd = gradContext[2]
+  
+  -- backward pass from the state merger
+  local gradStates
+  if gradStatesOutput then -- it can be nil if use nil bridge
+		gradStates = self.stateMerger:backward(self.stateMergerInput, gradStatesOutput)
+		gradStatesOutputFwd = gradStates[1]
+		gradStatesOutputBwd = gradStates[2]
   end
-
+  
+  
+	-- backward pass for the forward encoder
   local gradInputFwd = self.fwd:backward(batch, gradStatesOutputFwd, gradContextOutputFwd)
-
-  -- reverse gradients of the backward context
-  local gradContextBwd = onmt.utils.Tensor.reuseTensor(self.gradContextBwdProto,
-                                                       { batch.size, batch.sourceLength, self.args.rnnSize })
-
-  for t = 1, batch.sourceLength do
-    gradContextBwd[{{}, t}]:copy(gradContextOutputBwd[{{}, batch.sourceLength - t + 1}])
-  end
-
-  local gradInputBwd = self.bwd:backward(batch, gradStatesOutputBwd, gradContextBwd)
+	
+	-- backward pass for the backward encoder
+  local gradInputBwd = self.bwd:backward(batch, gradStatesOutputBwd, gradContextOutputBwd)
 
   for t = 1, batch.sourceLength do
     onmt.utils.Tensor.recursiveAdd(gradInputFwd[t], gradInputBwd[batch.sourceLength - t + 1])
   end
+  
+  self.contextMergerInput = nil
 
   return gradInputFwd
 end

@@ -99,6 +99,12 @@ function Factory.buildEncoder(opt, inputNetwork)
   if opt.rnn_type == 'GRU' then
     RNN = onmt.GRU
   end
+  
+  local nDecoderLayers = opt.layers
+  
+  if opt.rnn_type == 'LSTM' then
+		nDecoderLayers = 2 * opt.layers
+  end
 
   if opt.brnn then
     -- Compute rnn hidden size depending on hidden states merge action.
@@ -115,9 +121,9 @@ function Factory.buildEncoder(opt, inputNetwork)
     end
 
     local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, rnnSize, opt.dropout, opt.residual, opt.dropout_input)
-
-    encoder = onmt.BiEncoderFast.new(inputNetwork, rnn, opt.brnn_merge)
-    --~ encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt.brnn_merge)
+		
+		
+    encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt.brnn_merge, opt.bridge, nDecoderLayers)
     
     
   else

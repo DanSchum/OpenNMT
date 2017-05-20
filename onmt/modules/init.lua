@@ -3,7 +3,6 @@ onmt = onmt or {}
 require('onmt.modules.Sequencer')
 require('onmt.modules.Encoder')
 require('onmt.modules.BiEncoder')
-require('onmt.modules.BiEncoderFast')
 require('onmt.modules.Decoder')
 require('onmt.modules.ConditionalDecoder')
 
@@ -43,5 +42,6 @@ require('onmt.modules.Utils.ExpandAs')
 require('onmt.modules.Utils.JoinReplicateTable')
 require('onmt.modules.Utils.Reverse')
 require('onmt.modules.Utils.ZipTable')
+require('onmt.modules.Utils.NilModule')
 
 return onmt

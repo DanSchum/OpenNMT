@@ -96,7 +96,13 @@ function Checkpoint.loadFromCheckpoint(opt)
 		opt.coverage = checkpoint.options.coverage
 		opt.attention = checkpoint.options.attention
 		opt.dropout = checkpoint.options.dropout
-		opt.cgate = checkpoints.options.cgate 
+		opt.cgate = checkpoint.options.cgate
+		
+		-- for backward compatibility
+		if checkpoint.options.attention == 'cgate' then
+			opt.attention = 'general'
+			opt.cgate = true
+		end 
 
     -- Resume training from checkpoint
     if opt.continue then

@@ -27,6 +27,7 @@ local options = {
   {'-conditional', false, [[To use conditional LSTM decoder]]},
   {'-residual', false, [[Add residual connections between RNN layers.]]},
   {'-attention', 'general', [[Attention type: general/mlp. Global is the typical one, cgate is global with context gate]]},
+  {'-bridge', 'copy', [[Bridge between encoder decoder states: copy|nonlinear|nil. For copy, encoder and decoder must have the same nlayers]]},
   {'-cgate', false, [[To use context gate to control flow from context vector with the hidden state vector]]},
   {'-brnn', false, [[Use a bidirectional encoder]]},
   {'-brnn_merge', 'sum', [[Merge action for the bidirectional hidden states]],
