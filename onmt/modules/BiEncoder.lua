@@ -87,9 +87,10 @@ function BiEncoder.load(pretrained)
 
   self.fwd = onmt.Encoder.load(pretrained.modules[1])
   self.bwd = onmt.Encoder.load(pretrained.modules[2])
-  self.contextMerger = pretrained.modules[3]
-  self.stateMerger = pretrained.modules[4]
-  self.bridge      = pretrained.modules[5]
+  self.wordEmb = pretrained.modules[3]
+  self.contextMerger = pretrained.modules[4]
+  self.stateMerger = pretrained.modules[5]
+  self.bridge      = pretrained.modules[6]
   self.args = pretrained.args
   
   -- backward compatibility with old models
@@ -173,9 +174,6 @@ function BiEncoder:_buildContextMerger()
 end
 
 function BiEncoder:_buildStateMerger()
-	
-	
-	
 	local zipTable = nn.ZipTable()
 	
 	local paraTable = nn.ParallelTable()
@@ -231,7 +229,6 @@ end
 
 function BiEncoder:forward(batch)
   
-  self.buffers = {}
 	-- First, run forward pass for the two directional recurrent encoders
   local fwdStates, fwdContext = self.fwd:forward(batch)
   reverseInput(batch)
@@ -241,8 +238,6 @@ function BiEncoder:forward(batch)
   -- Second, merge them using the mergers
   local contextMergerInput = {fwdContext, bwdContext}
   local stateMergerInput = {fwdStates, bwdStates}
-  
-  
   
   local context = self.contextMerger:forward(contextMergerInput)
   local encOutStates = self.stateMerger:forward(stateMergerInput)
