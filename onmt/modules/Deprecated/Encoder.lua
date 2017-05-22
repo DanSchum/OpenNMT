@@ -21,7 +21,7 @@ Parameters:
   * `inputNetwork` - input module.
   * `rnn` - recurrent module.
 ]]
-function Encoder:__init(inputNetwork, rnn, opt)
+function Encoder:__init(inputNetwork, rnn)
   self.rnn = rnn
   self.inputNet = inputNetwork
 
@@ -29,8 +29,6 @@ function Encoder:__init(inputNetwork, rnn, opt)
   self.args.rnnSize = self.rnn.outputSize
   self.args.numEffectiveLayers = self.rnn.numEffectiveLayers
   self.args.layers = self.rnn.layers
-  self.args.dropout = opt.dropout
-  self.args.recDropout = opt.recDropout
 
   parent.__init(self, self:_buildModel())
 
@@ -67,16 +65,6 @@ function Encoder:resetPreallocation()
 
   -- Prototype for preallocated context vector.
   self.contextProto = torch.Tensor()
-  
-  -- For mask allocation
-  if self.args.layers > 1 then
-		self.inputMaskProto = torch.Tensor()
-  end
-
-  self.recurrentMaskProto = torch.Tensor()
-		
-	-- maybe an output mask as well ? 
-  
 end
 
 function Encoder:maskPadding()
@@ -103,17 +91,6 @@ function Encoder:_buildModel()
     table.insert(inputs, h0)
     table.insert(states, h0)
   end
-  
-  if self.args.layers > 1 then
-		local inputMask = nn.Identity()()
-		table.insert(inputs, inputMask)
-		table.insert(states, inputMask)
-	end
-	
-	local recurrentMask = nn.Identity()()
-  table.insert(states, recurrentMask)
-  table.insert(inputs, recurrentMask) 
-  
 
   -- Input word.
   local x = nn.Identity()() -- batchSize
@@ -126,41 +103,6 @@ function Encoder:_buildModel()
   -- Forward states and input into the RNN.
   local outputs = self.rnn(states)
   return nn.gModule(inputs, { outputs })
-end
-
-function Encoder:generateDropoutMask(batchSize)
-	
-	local inputMask
-	if self.inputMaskProto then
-		inputMask = onmt.utils.Tensor.reuseTensor(self.inputMaskProto,
-                                                { batchSize, self.args.layers-1, self.args.rnnSize }):fill(1)
-	end
-	
-	local recurrentMask = onmt.utils.Tensor.reuseTensor(self.recurrentMaskProto,
-                                                { batchSize, self.args.layers, self.args.rnnSize }):fill(1)   
-	
-	-- if training then sample from a Bernoulli distribution
-	if self.train then
-		
-		if inputMask then
-			inputMask:bernoulli(1 - self.args.dropout)
-			inputMask:div(1 - self.args.dropout)
-		end
-		
-		recurrentMask:bernoulli(1 - self.args.recDropout)
-		recurrentMask:div(1 - self.args.recDropout)
-	end
-	
-	local masks = {}
-  --~ masks[1] = inputMask
-  --~ masks[2] = recurrentMask                        
-	
-	if inputMask then
-		table.insert(masks, inputMask)
-	end
-	table.insert(masks, recurrentMask)
-	
-	return masks
 end
 
 --[[Compute the context representation of an input.
@@ -180,10 +122,6 @@ function Encoder:forward(batch)
 
   local finalStates
   local outputSize = self.args.rnnSize
-  
-  -- generate masks based on batch size
-  -- same masks are used throughout the sequence forward pass
-  local masks = self:generateDropoutMask(batch.size)
 
   if self.statesProto == nil then
     self.statesProto = onmt.utils.Tensor.initTensorTable(self.args.numEffectiveLayers,
@@ -199,7 +137,7 @@ function Encoder:forward(batch)
                                                 { batch.size, batch.sourceLength, outputSize })
 
 	-- 
-  if self.maskPad and not batch.sourceImergenputPadLeft then
+  if self.maskPad and not batch.sourceInputPadLeft then
     finalStates = onmt.utils.Tensor.recursiveClone(states)
   end
   
@@ -214,11 +152,6 @@ function Encoder:forward(batch)
     -- Construct "inputs". Prev states come first then source.
     local inputs = {}
     onmt.utils.Table.append(inputs, states)
-    
-    -- masks for variational RNN 
-    onmt.utils.Table.append(inputs, masks)
-    
-    -- input at time t (word index or word + feature indices)
     table.insert(inputs, batch:getSourceInput(t))
 
     if self.train then

@@ -8,8 +8,9 @@ local options = {
                      {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
   {'-rnn_size', 500, [[Size of RNN hidden states]],
                      {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
-  {'-rnn_type', 'LSTM', [[Type of RNN cell]],
-                     {enum={'LSTM','GRU'}}},
+  {'-enc_rnn_type', '', [[Type of encoder RNN cell]]},
+  {'-dec_rnn_type', '', [[Type of decoder RNN cell]]},
+  {'-rnn_type', 'LSTM', [[Type of RNN cell]]},
   {'-word_vec_size', 0, [[Common word embedding size. If set, this overrides -src_word_vec_size and -tgt_word_vec_size.]],
                      {valid=onmt.utils.ExtendedCmdLine.isUInt()}},
   {'-src_word_vec_size', '500', [[Comma-separated list of source embedding sizes: word[,feat1,feat2,...].]]},
@@ -30,7 +31,7 @@ local options = {
   {'-bridge', 'copy', [[Bridge between encoder decoder states: copy|nonlinear|nil. For copy, encoder and decoder must have the same nlayers]]},
   {'-cgate', false, [[To use context gate to control flow from context vector with the hidden state vector]]},
   {'-brnn', false, [[Use a bidirectional encoder]]},
-  {'-brnn_merge', 'sum', [[Merge action for the bidirectional hidden states]],
+  {'-brnn_merge', 'concat', [[Merge action for the bidirectional hidden states]],
                      {enum={'concat','sum'}}},
   {'-pre_word_vecs_enc', '', [[If a valid path is specified, then this will load
                                      pretrained word embeddings on the encoder side.
@@ -43,6 +44,7 @@ local options = {
   {'-fix_word_vecs_enc', false, [[Fix word embeddings on the encoder side]]},
   {'-fix_word_vecs_dec', false, [[Fix word embeddings on the decoder side]]},
   {'-dropout', 0.3, [[Dropout probability. Dropout is applied between vertical LSTM stacks.]]},
+  {'-recDropout', 0.3, [[Dropout probability. Dropout is applied on LSTM recurrent connection.]]},
   {'-dropout_input', 0, [[Dropout probability on embedding (input of LSTM)]]},
   {'-tie_embedding', false, [[Tie the embedding layer and the linear layer of the output]]}
 }
@@ -59,14 +61,9 @@ function Seq2Seq:__init(args, dicts, verbose)
   self.models.decoder = onmt.Factory.buildWordDecoder(args, dicts.tgt, verbose)
   self.criterion = onmt.ParallelClassNLLCriterion(onmt.Factory.getOutputSizes(dicts.tgt))
   
-  self.sync = true
-  if args.enc_layers and args.enc_layers ~= args.layers then
-		self.sync = false
-  end
   
-  if self.sync == false then
-		_G.logger:info(" * Decoder and encoder have different number of layers. Bridging between them is thus not possible")
-  end
+  
+  
   
 end
 
@@ -80,14 +77,7 @@ function Seq2Seq.load(args, models, dicts, isReplica)
   self.models.decoder = onmt.Factory.loadDecoder(models.decoder, isReplica)
   self.criterion = onmt.ParallelClassNLLCriterion(onmt.Factory.getOutputSizes(dicts.tgt))
   
-	self.sync = true
-  if args.enc_layers and args.enc_layers ~= args.layers then
-		self.sync = false
-  end
-  
-  if self.sync == false then
-		_G.logger:info(" * Decoder and encoder have different number of layers. Bridging between them is thus not possible")
-  end
+	
  
 
   return self
@@ -117,19 +107,12 @@ end
 function Seq2Seq:forwardComputeLoss(batch)
   local encoderStates, context = self.models.encoder:forward(batch)
   
-  if self.sync == false then
-		encoderStates = nil
-  end
-  
   return self.models.decoder:computeLoss(batch, encoderStates, context, self.criterion)
 end
 
 function Seq2Seq:trainNetwork(batch, dryRun)
   local encStates, context = self.models.encoder:forward(batch)
 	
-	if self.sync == false then
-		encStates = nil
-	end
 	
   local decOutputs = self.models.decoder:forward(batch, encStates, context)
 
@@ -139,10 +122,6 @@ function Seq2Seq:trainNetwork(batch, dryRun)
 
   local encGradStatesOut, gradContext, loss = self.models.decoder:backward(batch, decOutputs, self.criterion)
   
-  if self.sync == false then
-		encGradStatesOut = nil
-  end
-  
   self.models.encoder:backward(batch, encGradStatesOut, gradContext)
 
   return loss
@@ -151,10 +130,6 @@ end
 function Seq2Seq:sampleBatch(batch, maxLength, argmax)
 	
 	local encStates, context = self.models.encoder:forward(batch)
-	
-	if self.sync == false then
-		encStates = nil
-	end
 	
 	local sampledBatch = self.models.decoder:sampleBatch(batch, encStates, context, maxLength, argmax)
 	

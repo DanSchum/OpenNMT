@@ -42,23 +42,21 @@ Parameters:
   * `rnn` - recurrent template module.
   * `merge` - fwd/bwd merge operation {"concat", "sum"}
 ]]
-function BiEncoder:__init(input, rnn, merge, bridge, nDecLayers)
+function BiEncoder:__init(input, rnn, opt, nDecLayers)
   parent.__init(self)
-
-  self.fwd = onmt.Encoder.new(input, rnn)
-  self.bwd = onmt.Encoder.new(input:clone('weight', 'bias', 'gradWeight', 'gradBias'), rnn:clone())
+  self.fwd = onmt.Encoder.new(input, rnn, opt)
+  self.bwd = onmt.Encoder.new(input:clone('weight', 'bias', 'gradWeight', 'gradBias'), rnn:clone(), opt)
   self.wordEmb = input:clone('weight', 'bias', 'gradWeight', 'gradBias')
 
   self.args = {}
-  self.args.merge = merge
+  self.args.merge = opt.brnn_merge
 
   self.args.rnnSize = rnn.outputSize
   self.args.numEffectiveLayers = rnn.numEffectiveLayers
   self.args.layers = rnn.layers
-  self.args.bridge = bridge
+  self.args.bridge = opt.bridge
   
-  self.args.nDecLayers = nDecLayers or self.args.numEffectiveLayers 
-
+  self.args.nDecLayers = nDecLayers or self.args.numEffectiveLayers
   if self.args.merge == 'concat' then
     self.args.hiddenSize = self.args.rnnSize * 2
   else
@@ -67,12 +65,13 @@ function BiEncoder:__init(input, rnn, merge, bridge, nDecLayers)
 
   self:add(self.fwd)
   self:add(self.bwd)
-  self:add(self.wordEmb)
+  
   
   self.contextMerger = self:_buildContextMerger()
   self.stateMerger = self:_buildStateMerger()
   self.bridge = self:_buildBridge()
 
+	self:add(self.wordEmb)
 	self:add(self.contextMerger)
 	self:add(self.stateMerger)
 	self:add(self.bridge)
@@ -84,7 +83,7 @@ function BiEncoder.load(pretrained)
   local self = torch.factory('onmt.BiEncoder')()
 
   parent.__init(self)
-
+  
   self.fwd = onmt.Encoder.load(pretrained.modules[1])
   self.bwd = onmt.Encoder.load(pretrained.modules[2])
   self.wordEmb = pretrained.modules[3]
@@ -108,12 +107,15 @@ function BiEncoder.load(pretrained)
 		self.args.bridge = 'copy'
 		self.bridge = self:_buildBridge()
   end
-
+	
   self:add(self.fwd)
   self:add(self.bwd)
+  self:add(self.wordEmb)
   self:add(self.contextMerger)
   self:add(self.stateMerger)
   self:add(self.bridge)
+  
+  assert(#self.modules == #pretrained.modules, "Number of saved modules is not the same as number of loaded modules. Something wrong happened")
 
   self:resetPreallocation()
 
@@ -203,6 +205,8 @@ function BiEncoder:_buildBridge()
 	local bridge
 	if self.args.bridge == 'copy' then
 		_G.logger:info(" * Identity bridge between encoder and decoder hidden states")
+		
+		assert(self.args.numEffectiveLayers == self.args.nDecLayers, "Encoder and Decoder must have the same layers to copy")
 		bridge = nn.MapTable(nn.Identity())
 	elseif self.args.bridge == 'affine' then
 		_G.logger:info(" * Non-linear affine transformation between encoder and decoder hidden states")
@@ -250,7 +254,7 @@ function BiEncoder:forward(batch)
 		self.stateMergerInput = stateMergerInput
 		self.bridgeInput = encOutStates
 	end
-  
+	  
   return states, context
 end
 

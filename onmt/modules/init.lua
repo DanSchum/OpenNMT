@@ -11,6 +11,7 @@ require('onmt.modules.Network')
 require('onmt.modules.GRU')
 require('onmt.modules.GRUNode')
 require('onmt.modules.LSTM')
+require('onmt.modules.RHN')
 require('onmt.modules.LSTMCell')
 
 require('onmt.modules.MaskedSoftmax')

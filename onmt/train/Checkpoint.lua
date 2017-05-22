@@ -104,16 +104,17 @@ function Checkpoint.loadFromCheckpoint(opt)
 			opt.cgate = true
 		end 
 
-    -- Resume training from checkpoint
+    -- Resume training statistics for optim
     if opt.continue then
+			_G.logger:info("Loading optim statistics from old checkpoint")
       opt.optim = checkpoint.options.optim
-      opt.learning_rate_decay = checkpoint.options.learning_rate_decay
-      opt.start_decay_at = checkpoint.options.start_decay_at
-      opt.curriculum = checkpoint.options.curriculum
+      --~ opt.learning_rate_decay = checkpoint.options.learning_rate_decay
+      --~ opt.start_decay_at = checkpoint.options.start_decay_at
+      --~ opt.curriculum = checkpoint.options.curriculum
 
-      opt.learning_rate = checkpoint.info.learningRate
-      opt.start_epoch = checkpoint.info.epoch
-      opt.start_iteration = checkpoint.info.iteration
+      --~ opt.learning_rate = checkpoint.info.learningRate
+      --~ opt.start_epoch = checkpoint.info.epoch
+      --~ opt.start_iteration = checkpoint.info.iteration
 
       _G.logger:info('Resuming training from epoch ' .. opt.start_epoch
                          .. ' at iteration ' .. opt.start_iteration .. '...')

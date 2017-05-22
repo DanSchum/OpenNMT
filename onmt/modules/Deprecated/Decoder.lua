@@ -26,8 +26,7 @@ Parameters:
   * `generator` - optional, an output [onmt.Generator](onmt+modules+Generator).
   * `inputFeed` - bool, enable input feeding.
 --]]
---~ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, contextGate, coverage)
-function Decoder:__init(inputNetwork, rnn, generator, opt)
+function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, contextGate, coverage)
   self.rnn = rnn
   self.inputNet = inputNetwork
 
@@ -35,9 +34,6 @@ function Decoder:__init(inputNetwork, rnn, generator, opt)
   self.args.inputSize = self.rnn.inputSize
   self.args.rnnSize = self.rnn.outputSize
   self.args.numEffectiveLayers = self.rnn.numEffectiveLayers
-  self.args.dropout = opt.dropout
-  self.args.recDropout = opt.recDropout
-  self.args.layers = self.rnn.layers
 
   self.args.inputIndex = {}
   self.args.outputIndex = {}
@@ -45,22 +41,23 @@ function Decoder:__init(inputNetwork, rnn, generator, opt)
   -- Input feeding means the decoder takes an extra
   -- vector each time representing the attention at the
   -- previous step.
-  self.args.inputFeed = opt.input_feed or 1
-  self.args.coverageSize = opt.coverage
-  self.args.contextGate = opt.cgate
+  self.args.inputFeed = inputFeed
+  self.args.coverageSize = coverage
+  self.args.contextGate = contextGate or false
   
   -- backward compatibility with older models
   if self.args.coverageSize == nil then 
 		self.args.coverageSize = 0
 	end
 	
-	-- Attention type
-  self.args.attention = opt.attention
-	
 	if self.args.attention == nil then
 		self.args.attention = 'general'
 	end
   
+  
+  -- Attention type
+  self.args.attention = attention
+
   parent.__init(self, self:_buildModel())
 
   -- The generator use the output of the decoder sequencer to generate the
@@ -81,7 +78,6 @@ function Decoder.load(pretrained)
   self.generator = pretrained.modules[2]
   self:add(self.generator)
   
-  -- backward compatible
   if self.args.inputFeed == true then
 		self.args.inputFeed = 1
   end
@@ -126,59 +122,6 @@ function Decoder:resetPreallocation()
   self.gradHiddenProto = torch.Tensor()
   
   self.samplingProto = torch.Tensor()
-  
-  
-  -- For mask allocation
-  if self.args.layers > 1 then
-		self.inputMaskProto = torch.Tensor()
-  end
-
-  self.recurrentMaskProto = torch.Tensor()
-  
-  self.outputMaskProto = torch.Tensor()
-		
-	-- maybe an output mask as well ? 
-end
-
---[[ Generate masks for Variational Decoder
-		 Should be called before each sequence training forward pass
-		 During decoding/eval: masks will be 1
---]]
-function Decoder:generateDropoutMask(batchSize)
-	
-	local inputMask
-	if self.inputMaskProto then
-		inputMask = onmt.utils.Tensor.reuseTensor(self.inputMaskProto,
-                                                { batchSize, self.args.layers-1, self.args.rnnSize }):fill(1)
-	end
-	
-	local recurrentMask = onmt.utils.Tensor.reuseTensor(self.recurrentMaskProto,
-                                                { batchSize, self.args.layers, self.args.rnnSize }):fill(1)   
-	
-	local outputMask = onmt.utils.Tensor.reuseTensor(self.outputMaskProto,
-                                                { batchSize, self.args.rnnSize }):fill(1)   
-	-- if training then sample from a Bernoulli distribution
-	if self.train then
-		
-		if inputMask then
-			inputMask:bernoulli(1 - self.args.dropout)
-			inputMask:div(1 - self.args.dropout)
-		end
-		
-		recurrentMask:bernoulli(1 - self.args.recDropout)
-		recurrentMask:div(1 - self.args.recDropout)
-		
-		outputMask:bernoulli(1 - self.args.dropout)
-		outputMask:div(1 - self.args.dropout)
-	end
-	
-	local masks = {}
-	
-	if inputMask then table.insert(masks, inputMask) end
-	table.insert(masks, recurrentMask)
-	table.insert(masks, outputMask)                      
-	
-	return masks
 end
 
 --[[ Build a default one time-step of the decoder
@@ -204,20 +147,6 @@ function Decoder:_buildModel()
     table.insert(inputs, h0)
     table.insert(states, h0)
   end
-  
-  local inputMasks
-  if self.args.layers > 1 then
-		inputMasks = nn.Identity()()
-		table.insert(inputs, inputMasks) -- inputMask
-		table.insert(states, inputMasks)
-  end 
-  
-  local recurrentMasks = nn.Identity()() -- recurrentMask
-  table.insert(inputs, recurrentMasks)
-	table.insert(states, recurrentMasks)
-	
-	local outputMask = nn.Identity()()
-  table.insert(inputs, outputMask)
 
   local x = nn.Identity()() -- batchSize
   table.insert(inputs, x)
@@ -317,11 +246,9 @@ function Decoder:_buildModel()
 		finalHidden = nn.Tanh()(nn.Linear(2 * self.args.rnnSize, self.args.rnnSize, false)(gatedContextCombined))
   end
   
-  --~ if self.rnn.dropout > 0 then
-    --~ finalHidden = nn.Dropout(self.rnn.dropout)(finalHidden)
-  --~ end
-  
-  finalHidden = nn.CMulTable()({finalHidden, outputMask})
+  if self.rnn.dropout > 0 then
+    finalHidden = nn.Dropout(self.rnn.dropout)(finalHidden)
+  end
   
   table.insert(outputs, finalHidden)
   
@@ -379,21 +306,11 @@ Returns:
  1. `out` - Top-layer hidden state.
  2. `states` - All states.
 --]]
-function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t, masks)
+function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t)
   local inputs = {}
 
   -- Create RNN input (see sequencer.lua `buildNetwork('dec')`).
   onmt.utils.Table.append(inputs, prevStates)
-  local batchSize = context:size(1)
-  
-  if masks == nil then
-		assert(self.train == false, 'empty masks only available during evaluation')
-		masks = self:generateDropoutMask(batchSize)
-  end
-  
-  onmt.utils.Table.append(inputs, masks)
-
-  
   table.insert(inputs, input)
   table.insert(inputs, context)
   local inputSize
@@ -402,8 +319,6 @@ function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t
   else
     inputSize = input:size(1)
   end
-  
-  assert(inputSize == batchSize)
 
   if self.args.inputFeed > 0 then
     if prevOut == nil then
@@ -426,6 +341,8 @@ function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t
   if self.train then
     self.inputs[t] = inputs
   end
+  
+  --~ print(self.inputs[t])
   
   local outputs = self:net(t):forward(inputs)
 
@@ -467,15 +384,13 @@ function Decoder:forwardAndApply(batch, encoderStates, context, func)
                                                          self.stateProto,
                                                          { batch.size, self.args.rnnSize })
   end
-  
-  local masks = self:generateDropoutMask(batch.size)
 
   local states = onmt.utils.Tensor.copyTensorTable(self.statesProto, encoderStates)
 
   local prevOut, prevCoverage
 
   for t = 1, batch.targetLength do
-    prevOut, prevCoverage, states = self:forwardOne(batch:getTargetInput(t), states, context, prevOut, prevCoverage, t, masks)
+    prevOut, prevCoverage, states = self:forwardOne(batch:getTargetInput(t), states, context, prevOut, prevCoverage, t)
     func(prevOut, t)
   end
 end
@@ -532,8 +447,8 @@ function Decoder:backward(batch, outputs, criterion)
                                                          { batch.size, batch.sourceLength, self.args.rnnSize })
                                                          
   if self.args.coverageSize > 0 then
-		local gradCoverageOutput = onmt.utils.Tensor.reuseTensor(self.gradCoverageProto, {batch.size, batch.sourceLength, self.args.coverageSize})
-		table.insert(gradStatesInput, gradCoverageOutput)
+	local gradCoverageOutput = onmt.utils.Tensor.reuseTensor(self.gradCoverageProto, {batch.size, batch.sourceLength, self.args.coverageSize})
+	table.insert(gradStatesInput, gradCoverageOutput)
   end
   
   local gradHiddenProto = onmt.utils.Tensor.reuseTensor(self.gradHiddenProto, {batch.size, self.args.rnnSize})
@@ -583,14 +498,8 @@ function Decoder:backward(batch, outputs, criterion)
       gradStatesInput[i]:copy(gradInput[i])
     end
   end
-  
-  local gradEncoderStates = {}
-  -- only return the gradients w.r.t encoder states
-  for i = 1, #self.statesProto do
-		table.insert(gradEncoderStates, gradStatesInput[i])
-  end
 
-  return gradEncoderStates, gradContextInput, loss
+  return gradStatesInput, gradContextInput, loss
 end
 
 --[[ Compute the loss on a batch.

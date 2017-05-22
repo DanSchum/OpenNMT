@@ -94,15 +94,31 @@ end
 
 function Factory.buildEncoder(opt, inputNetwork)
   local encoder
-
-  local RNN = onmt.LSTM
-  if opt.rnn_type == 'GRU' then
+  
+  -- RNN type for encoder
+  if opt.enc_rnn_type == '' then opt.enc_rnn_type = opt.rnn_type end
+  
+  
+  local RNN 
+  
+  if opt.enc_rnn_type == 'GRU' then
     RNN = onmt.GRU
+  elseif opt.enc_rnn_type == 'RHN' then
+		RNN = onmt.RHN
+  elseif opt.enc_rnn_type == 'LSTM' then
+		RNN = onmt.LSTM
+  else
+		error('RNN type not implemented')
   end
   
+  _G.logger:info(" * Encoder RNN type : " .. opt.enc_layers .. "-layer " .. opt.enc_rnn_type)
+  
+  -- number of layers (to compute bridge)
   local nDecoderLayers = opt.layers
   
-  if opt.rnn_type == 'LSTM' then
+  if opt.dec_rnn_type == '' then opt.dec_rnn_type = opt.rnn_type end
+  
+  if opt.dec_rnn_type == 'LSTM' then
 		nDecoderLayers = 2 * opt.layers
   end
 
@@ -123,13 +139,14 @@ function Factory.buildEncoder(opt, inputNetwork)
     local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, rnnSize, opt.dropout, opt.residual, opt.dropout_input)
 		
 		
-    encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt.brnn_merge, opt.bridge, nDecoderLayers)
+    --~ encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt.brnn_merge, opt.bridge, nDecoderLayers)
+    encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt, nDecoderLayers)
     
     
   else
     local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, opt.rnn_size, opt.dropout, opt.residual, opt.dropout_input)
 
-    encoder = onmt.Encoder.new(inputNetwork, rnn)
+    encoder = onmt.Encoder.new(inputNetwork, rnn, opt, nDecoderLayers)
   end
   return encoder
 end
@@ -157,7 +174,7 @@ function Factory.loadEncoder(pretrained, clone)
   -- Keep for backward compatibility.
   local brnn = #pretrained.modules == 2
   if brnn then
-    return onmt.BiEncoderFast.load(pretrained)
+    return onmt.BiEncoder.load(pretrained)
   else
     return onmt.Encoder.load(pretrained)
   end
@@ -170,11 +187,23 @@ function Factory.buildDecoder(opt, inputNetwork, generator, verbose)
 	if opt.input_feed == 1 then
 		inputSize = inputSize + opt.rnn_size
 	end
-
+	
+	-- RNN type for decoder
+	if opt.dec_rnn_type == '' then opt.dec_rnn_type = opt.rnn_type end
+	
   local RNN = onmt.LSTM
-  if opt.rnn_type == 'GRU' then
+  if opt.dec_rnn_type == 'GRU' then
     RNN = onmt.GRU
-  end
+  elseif opt.dec_rnn_type == 'RHN' then
+		RNN = onmt.RHN
+	elseif opt.dec_rnn_type == 'LSTM' then
+		RNN = onmt.LSTM
+	else
+		error('RNN type not implemented')
+	end
+	
+	_G.logger:info(" * Decoder RNN type : " .. opt.layers .. "-layer " .. opt.dec_rnn_type)
+  
   local rnn 
   
   if opt.conditional ~= true then
@@ -199,7 +228,8 @@ function Factory.buildDecoder(opt, inputNetwork, generator, verbose)
 		return onmt.ConditionalDecoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.cgate, opt.coverage)
   end
 	
-  return onmt.Decoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.cgate, opt.coverage)
+  --~ return onmt.Decoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.cgate, opt.coverage)
+  return onmt.Decoder.new(inputNetwork, rnn, generator, opt)
 end
 
 function Factory.buildWordDecoder(opt, dicts, verbose)

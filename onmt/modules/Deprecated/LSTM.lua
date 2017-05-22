@@ -43,20 +43,12 @@ function LSTM:__init(layers, inputSize, hiddenSize, dropout, residual, dropout_i
   self.inputSize = inputSize
   self.dropout_input = dropout_input
   self.ln = ln
-  self.variational = true
 
-  parent.__init(self, self:_buildModel(layers, inputSize, hiddenSize, residual, dropout_input))
+  parent.__init(self, self:_buildModel(layers, inputSize, hiddenSize, dropout, residual, dropout_input))
 end
 
-
-
 --[[ Stack the LSTM units. ]]
-function LSTM:_buildModel(layers, inputSize, hiddenSize, residual, dropout_input, ln)
-	
-	local function Dropout(input, noise)
-		return nn.CMulTable()({input, noise})
-	end
-
+function LSTM:_buildModel(layers, inputSize, hiddenSize, dropout, residual, dropout_input, ln)
   local inputs = {}
   local outputs = {}
 
@@ -64,19 +56,6 @@ function LSTM:_buildModel(layers, inputSize, hiddenSize, residual, dropout_input
     table.insert(inputs, nn.Identity()()) -- c0: batchSize x hiddenSize
     table.insert(inputs, nn.Identity()()) -- h0: batchSize x hiddenSize
   end
-  
-  local inputMasks
-  if layers > 1 then
-		table.insert(inputs, nn.Identity()()) -- vertical mask: batchSize x layers-1 x hiddenSize
-		inputMasks = inputs[#inputs]
-		
-		inputMasks = nn.SplitTable(2)(inputMasks)    
-  end
-   
-  table.insert(inputs, nn.Identity()()) -- recurrentMask: batchSize x layers x hiddenSize
-	local recurrentMasks = inputs[#inputs]
-	
-	recurrentMasks = nn.SplitTable(2)(recurrentMasks)
 
   table.insert(inputs, nn.Identity()()) -- x: batchSize x inputSize
   local x = inputs[#inputs]
@@ -99,20 +78,14 @@ function LSTM:_buildModel(layers, inputSize, hiddenSize, residual, dropout_input
       if residual and (L > 2 or inputSize == hiddenSize) then
         input = nn.CAddTable()({input, prevInput})
       end
-      
-      -- Apply input dropout to input (only from the second layer)
-      local inputMask_L = nn.SelectTable(L-1)(inputMasks)
-      input = Dropout(input, inputMask_L)
+      if dropout > 0 then
+        input = nn.Dropout(dropout)(input)
+      end
     end
 
     local prevC = inputs[L*2 - 1]
     local prevH = inputs[L*2]
-    
-    -- Apply recurrent dropout to prevH 
-    local recurrentMask_L = nn.SelectTable(L)(recurrentMasks)
-    prevH = Dropout(prevH, recurrentMask_L)
-		
-		-- Normal LSTM logic should be the same
+
     nextC, nextH = self:_buildLayer(inputDim, hiddenSize, ln)({prevC, prevH, input}):split(2)
     prevInput = input
 
