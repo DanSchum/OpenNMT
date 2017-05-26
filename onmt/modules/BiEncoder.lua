@@ -111,6 +111,7 @@ function BiEncoder.load(pretrained)
 
   self:add(self.fwd)
   self:add(self.bwd)
+  self:add(self.wordEmb)
   self:add(self.contextMerger)
   self:add(self.stateMerger)
   self:add(self.bridge)
