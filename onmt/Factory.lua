@@ -96,15 +96,17 @@ function Factory.buildEncoder(opt, inputNetwork)
   local encoder
 
   local RNN = onmt.LSTM
-  if opt.rnn_type == 'GRU' then
-    RNN = onmt.GRU
-  end
+  --~ if opt.rnn_type == 'GRU' then
+    --~ RNN = onmt.GRU
+  --~ end
   
   local nDecoderLayers = opt.layers
   
   if opt.rnn_type == 'LSTM' then
 		nDecoderLayers = 2 * opt.layers
   end
+  
+  local inputSize = inputNetwork.inputSize
 
   if opt.brnn then
     -- Compute rnn hidden size depending on hidden states merge action.
@@ -120,14 +122,14 @@ function Factory.buildEncoder(opt, inputNetwork)
       error('invalid merge action ' .. opt.brnn_merge)
     end
 
-    local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, rnnSize, opt.dropout, opt.residual, opt.dropout_input)
 		
+	  local rnn = RNN.new(opt, inputSize, rnnSize)
 		
     encoder = onmt.BiEncoder.new(inputNetwork, rnn, opt.brnn_merge, opt.bridge, nDecoderLayers)
     
     
   else
-    local rnn = RNN.new(opt.enc_layers, inputNetwork.inputSize, opt.rnn_size, opt.dropout, opt.residual, opt.dropout_input)
+    local rnn = RNN.new(opt, inputSize, opt.rnn_size)
 
     encoder = onmt.Encoder.new(inputNetwork, rnn)
   end
@@ -135,6 +137,7 @@ function Factory.buildEncoder(opt, inputNetwork)
 end
 
 function Factory.buildWordEncoder(opt, dicts)
+	_G.logger:info(' * Building Encoder ... ')
   local inputNetwork = buildInputNetwork(opt, dicts,
                                          opt.src_word_vec_size or opt.word_vec_size,
                                          opt.pre_word_vecs_enc, opt.fix_word_vecs_enc)
@@ -163,46 +166,15 @@ function Factory.loadEncoder(pretrained, clone)
   end
 end
 
-function Factory.buildDecoder(opt, inputNetwork, generator, verbose)
-  local inputSize = inputNetwork.inputSize
-
-      
-	if opt.input_feed == 1 then
-		inputSize = inputSize + opt.rnn_size
-	end
-
-  local RNN = onmt.LSTM
-  if opt.rnn_type == 'GRU' then
-    RNN = onmt.GRU
-  end
-  local rnn 
-  
-  if opt.conditional ~= true then
-		rnn = RNN.new(opt.layers, inputSize, opt.rnn_size, opt.dropout, opt.residual, opt.dropout_input)
-  else
-		rnn = {}
-		rnn.layers = opt.layers
-		rnn.inputSize = inputSize
-		rnn.outputSize = opt.rnn_size
-		rnn.dropout = opt.dropout
-		rnn.numEffectiveLayers = 2 * opt.layers
-  end
-  
-  if opt.attention == 'cgate' then
-    if verbose then
-      _G.logger:info(' * using context gate attention')
-    end
-  end
-  
-  -- To use a conditional decoder
-  if opt.conditional then
-		return onmt.ConditionalDecoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.cgate, opt.coverage)
-  end
+function Factory.buildDecoder(opt, inputNetwork, generator, verbose)    
 	
-  return onmt.Decoder.new(inputNetwork, rnn, generator, opt.attention, opt.input_feed, opt.cgate, opt.coverage)
+  return onmt.Decoder.new(opt, inputNetwork, generator)
 end
 
 function Factory.buildWordDecoder(opt, dicts, verbose)
+	
+	_G.logger:info(' * Building Decoder ... ')
+
   local inputNetwork = buildInputNetwork(opt, dicts,
                                          opt.tgt_word_vec_size or opt.word_vec_size,
                                          opt.pre_word_vecs_dec, opt.fix_word_vecs_dec)

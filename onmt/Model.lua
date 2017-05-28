@@ -39,6 +39,18 @@ function Model:training()
   end
 end
 
+-- Dynamically change parameters in the graph.
+
+function Model:setDropout(p)
+		for _, model in pairs(self.models) do
+      model:apply(function(m)
+        if torch.typename(m) == 'nn.Dropout' or torch.typename(m) == 'onmt.VDropout' then
+          m:setp(p)
+				end
+			end)
+		end
+end
+
 function Model:initParams(verbose)
   local numParams = 0
   local params = {}

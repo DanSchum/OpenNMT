@@ -65,6 +65,9 @@ function Encoder:resetPreallocation()
 
   -- Prototype for preallocated context vector.
   self.contextProto = torch.Tensor()
+  
+  -- Prototype for preallocated vocabulary mask
+  self.vocabProto = torch.Tensor()
 end
 
 function Encoder:maskPadding()
@@ -143,6 +146,7 @@ function Encoder:forward(batch)
   
   if self.train then
     self.inputs = {}
+    
   end
 
   -- Act like nn.Sequential and call each clone in a feed-forward
@@ -157,7 +161,9 @@ function Encoder:forward(batch)
     if self.train then
       -- Remember inputs for the backward pass.
       self.inputs[t] = inputs
+      self:initVariationalNoise(batch.size)
     end
+    
     states = self:net(t):forward(inputs)
 
     -- Make sure it always returns table.

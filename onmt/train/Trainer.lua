@@ -151,6 +151,11 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 				local batchOrderIndex = iter 
 								
 				local batchIdx = batchOrder[batchOrderIndex]
+				
+				local i = iter % numIterationsPerEpoch
+				if currentEpoch <= self.args.curriculum then
+					batchIdx = i
+				end
 				local batch = trainData:getBatch(batchIdx)
 				totalSize = batch.size
 				
@@ -194,6 +199,7 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
 					
 					-- reshuffle the training data every epoch
 					batchOrder = torch.randperm(trainData:batchCount())
+					
 					
 					-- save the last time
 					if currentEpoch - 1 == self.args.end_epoch then

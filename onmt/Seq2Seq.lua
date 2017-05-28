@@ -30,7 +30,7 @@ local options = {
   {'-bridge', 'copy', [[Bridge between encoder decoder states: copy|nonlinear|nil. For copy, encoder and decoder must have the same nlayers]]},
   {'-cgate', false, [[To use context gate to control flow from context vector with the hidden state vector]]},
   {'-brnn', false, [[Use a bidirectional encoder]]},
-  {'-brnn_merge', 'sum', [[Merge action for the bidirectional hidden states]],
+  {'-brnn_merge', 'concat', [[Merge action for the bidirectional hidden states]],
                      {enum={'concat','sum'}}},
   {'-pre_word_vecs_enc', '', [[If a valid path is specified, then this will load
                                      pretrained word embeddings on the encoder side.
@@ -43,6 +43,8 @@ local options = {
   {'-fix_word_vecs_enc', false, [[Fix word embeddings on the encoder side]]},
   {'-fix_word_vecs_dec', false, [[Fix word embeddings on the decoder side]]},
   {'-dropout', 0.3, [[Dropout probability. Dropout is applied between vertical LSTM stacks.]]},
+  {'-rec_dropout', 0.3, [[Dropout probability on Recurrent connection. Only use with variational dropout]]},
+  {'-dropout_type', 'variational', [[Dropout type: naive | variational]], {enum={'variational','naive'}}},
   {'-dropout_input', 0, [[Dropout probability on embedding (input of LSTM)]]},
   {'-tie_embedding', false, [[Tie the embedding layer and the linear layer of the output]]}
 }

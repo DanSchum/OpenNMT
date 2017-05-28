@@ -1,3 +1,17 @@
+-- [[Retrieve the variational dropout layers]]
+local function getVDLayers(net)
+
+	local VDLayers = {}
+	net:apply(function(m) 
+							if torch.typename(m) == 'onmt.VDropout' then 
+									--~ m:initNoise(batch.size)
+									table.insert(VDLayers, m)
+							end 
+					 end)
+	return VDLayers
+end
+
+
 require('nngraph')
 
 --[[ Sequencer is the base class for encoder and decoder models.
@@ -19,6 +33,11 @@ function Sequencer:__init(network)
 
   self.network = network
   self:add(self.network)
+  
+  -- Variational sequencer: we have to keep track of the Variational Dropout layers
+  -- in the network as well as the clones
+  self.VDLayers = getVDLayers(self.network)
+  self.clonedVDLayers = {}
 
   self.networkClones = {}
 end
@@ -67,7 +86,7 @@ function Sequencer:_sharedClone()
   end
 
   collectgarbage()
-
+  
   return clone
 end
 
@@ -87,6 +106,10 @@ function Sequencer:net(t)
       local clone = self:_sharedClone()
       clone:training()
       self.networkClones[t] = clone
+      
+      --remember the VDLayers for this clone
+			local VDLayers = getVDLayers(clone)
+			self.clonedVDLayers[t] = VDLayers
     end
     return self.networkClones[t]
   else
@@ -115,4 +138,21 @@ function Sequencer:evaluate()
   if #self.networkClones > 0 then
     self.networkClones[1]:evaluate()
   end
+end
+
+--[[ Generate noise for variational dropout. ]]
+function Sequencer:initVariationalNoise(batchSize)
+	
+	-- Generate noise for the main network
+	for i = 1, #self.VDLayers do
+		self.VDLayers[i]:initNoise(batchSize)
+	end
+	
+	
+	-- Then we set the noise mask for all other clones 
+	for t = 1, #self.networkClones do
+		for i = 1, #self.VDLayers do
+			self.clonedVDLayers[t][i].noise:set(self.VDLayers[i].noise)
+		end
+	end
 end

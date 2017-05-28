@@ -4,7 +4,6 @@ require('onmt.modules.Sequencer')
 require('onmt.modules.Encoder')
 require('onmt.modules.BiEncoder')
 require('onmt.modules.Decoder')
-require('onmt.modules.ConditionalDecoder')
 
 require('onmt.modules.Network')
 
@@ -16,11 +15,10 @@ require('onmt.modules.LSTMCell')
 require('onmt.modules.MaskedSoftmax')
 require('onmt.modules.WordEmbedding')
 require('onmt.modules.FeaturesEmbedding')
+require('onmt.modules.VDropout')
 
 -- Attention modules
 require('onmt.modules.GlobalAttention')
-require('onmt.modules.GlobalMLPAttention')
-require('onmt.modules.ContextGateAttention')
 
 
 require('onmt.modules.Generator')
@@ -36,7 +34,6 @@ require('onmt.modules.Coverage.CoverageAttention')
 -- Other utility modules
 require('onmt.modules.Utils.SequenceLinear')
 require('onmt.modules.Utils.Replicator')
-require('onmt.modules.Utils.Energy')
 require('onmt.modules.Utils.LayerNormalization')
 require('onmt.modules.Utils.ExpandAs')
 require('onmt.modules.Utils.JoinReplicateTable')

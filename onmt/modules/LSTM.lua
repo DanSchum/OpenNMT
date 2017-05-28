@@ -33,22 +33,25 @@ Parameters:
   * `dropout` - Dropout rate to use.
   * `residual` - Residual connections between layers.
 --]]
-function LSTM:__init(layers, inputSize, hiddenSize, dropout, residual, dropout_input)
+function LSTM:__init(args, inputSize, hiddenSize)
   dropout = dropout or 0
 
-  self.dropout = dropout
-  self.layers = layers
-  self.numEffectiveLayers = 2 * layers
+  self.dropout = args.dropout
+  self.recDropout = args.rec_dropout
+  self.layers = args.layers
+  self.numEffectiveLayers = 2 * args.layers
   self.outputSize = hiddenSize
   self.inputSize = inputSize
-  self.dropout_input = dropout_input
-  self.ln = ln
-
-  parent.__init(self, self:_buildModel(layers, inputSize, hiddenSize, dropout, residual, dropout_input))
+  self.ln = args.ln
+  self.dropout_type = args.dropout_type
+  self.hiddenSize = hiddenSize
+  self.residual = args.residual
+  
+  parent.__init(self, self:_buildModel(self.layers, inputSize, self.hiddenSize, self.dropout, self.recDropout, self.residual, self.dropout_type))
 end
 
 --[[ Stack the LSTM units. ]]
-function LSTM:_buildModel(layers, inputSize, hiddenSize, dropout, residual, dropout_input, ln)
+function LSTM:_buildModel(layers, inputSize, hiddenSize, dropout, recDropout, residual, dropout_type)
   local inputs = {}
   local outputs = {}
 
@@ -67,6 +70,7 @@ function LSTM:_buildModel(layers, inputSize, hiddenSize, dropout, residual, drop
   for L = 1, layers do
     local input
     local inputDim
+    
 
     if L == 1 then
       -- First layer input is x.
@@ -78,13 +82,24 @@ function LSTM:_buildModel(layers, inputSize, hiddenSize, dropout, residual, drop
       if residual and (L > 2 or inputSize == hiddenSize) then
         input = nn.CAddTable()({input, prevInput})
       end
-      if dropout > 0 then
+    end
+    
+    local prevC = inputs[L*2 - 1]
+    local prevH = inputs[L*2]
+    
+    -- apply variational dropout on recurrent connections
+    if dropout_type == "variational" then
+      prevH = onmt.VDropout(recDropout, hiddenSize)(prevH)
+    end
+    
+    -- apply dropout or v.dropout on vertical connections
+    if L > 1 then
+			if dropout_type == "variational" then
+        input = onmt.VDropout(dropout, hiddenSize)(input)
+      else
         input = nn.Dropout(dropout)(input)
       end
     end
-
-    local prevC = inputs[L*2 - 1]
-    local prevH = inputs[L*2]
 
     nextC, nextH = self:_buildLayer(inputDim, hiddenSize, ln)({prevC, prevH, input}):split(2)
     prevInput = input

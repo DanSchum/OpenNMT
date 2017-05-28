@@ -26,11 +26,25 @@ Parameters:
   * `generator` - optional, an output [onmt.Generator](onmt+modules+Generator).
   * `inputFeed` - bool, enable input feeding.
 --]]
-function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, contextGate, coverage)
-  self.rnn = rnn
+function Decoder:__init(args, inputNetwork, generator)
+  
+	local inputSize = inputNetwork.inputSize
+	
+  if args.input_feed == 1 then
+		inputSize = inputSize + args.rnn_size
+	end
+	
+  -- currently GRU is very buggy, so not used yet
+  local rnn = onmt.LSTM.new(args, inputSize, args.rnn_size) 
+  
+  if args.dropout_type == 'variational' then
+		_G.logger:info(' * Using Variational Dropout on Decoder ')
+  end
+                      
   self.inputNet = inputNetwork
+	self.rnn = rnn
 
-  self.args = {}
+  self.args = args
   self.args.inputSize = self.rnn.inputSize
   self.args.rnnSize = self.rnn.outputSize
   self.args.numEffectiveLayers = self.rnn.numEffectiveLayers
@@ -41,9 +55,11 @@ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, cont
   -- Input feeding means the decoder takes an extra
   -- vector each time representing the attention at the
   -- previous step.
-  self.args.inputFeed = inputFeed
-  self.args.coverageSize = coverage
-  self.args.contextGate = contextGate or false
+  self.args.inputFeed = args.input_feed
+  self.args.coverageSize = args.coverage
+  self.args.contextGate = args.cgate or false
+  -- Attention type: general|mlp
+  self.args.attention = args.attention
   
   -- backward compatibility with older models
   if self.args.coverageSize == nil then 
@@ -55,8 +71,7 @@ function Decoder:__init(inputNetwork, rnn, generator, attention, inputFeed, cont
 	end
   
   
-  -- Attention type
-  self.args.attention = attention
+  
 
   parent.__init(self, self:_buildModel())
 
@@ -78,9 +93,15 @@ function Decoder.load(pretrained)
   self.generator = pretrained.modules[2]
   self:add(self.generator)
   
+  -- backward compatibility with older models
   if self.args.inputFeed == true then
 		self.args.inputFeed = 1
   end
+  
+  -- backward compatibility with older models
+  if self.args.coverageSize == nil then
+		self.args.coverageSize = 0
+	end
   
   self:resetPreallocation()
 
@@ -99,11 +120,6 @@ function Decoder:resetPreallocation()
   if self.args.inputFeed > 0 then
     self.inputFeedProto = torch.Tensor()
   end
-  
-  -- backward compatibility with older models
-  if self.args.coverageSize == nil then
-		self.args.coverageSize = 0
-	end
   
   if self.args.coverageSize > 0 then
 		self.coverageInputProto = torch.Tensor()
@@ -223,6 +239,7 @@ function Decoder:_buildModel()
   
   local contextVector = attnOutput
   
+  -- Combination of the context vector and the hidden state
   local contextCombined = nn.JoinTable(2)({contextVector, lstmHidden})
   local finalHidden
   if self.args.contextGate == false then
@@ -242,10 +259,17 @@ function Decoder:_buildModel()
 		finalHidden = nn.Tanh()(nn.Linear(2 * self.args.rnnSize, self.args.rnnSize, false)(gatedContextCombined))
   end
   
-  if self.rnn.dropout > 0 then
-    finalHidden = nn.Dropout(self.rnn.dropout)(finalHidden)
-  end
+  -- A final dropout layer before softmax
+  if self.args.dropout_type == 'naive' then
+		finalHidden = nn.Dropout(self.args.dropout)(finalHidden)
+	elseif self.args.dropout_type == 'variational' then
+		finalHidden = onmt.VDropout(self.args.rec_dropout, self.args.rnnSize)(finalHidden)
+	end
   
+  -- We will deal with softmax layer later 
+  -- For Cross Entropy training, we will compute CE loss during the backward pass for efficiency
+	-- For Sampling-based training, we will use another network including the generator during forward to 
+	-- handle sampling
   table.insert(outputs, finalHidden)
   
   return nn.gModule(inputs, outputs)
@@ -315,7 +339,8 @@ function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t
   else
     inputSize = input:size(1)
   end
-
+	
+	-- Prepare input feeding
   if self.args.inputFeed > 0 then
     if prevOut == nil then
       table.insert(inputs, onmt.utils.Tensor.reuseTensor(self.inputFeedProto,
@@ -326,10 +351,10 @@ function Decoder:forwardOne(input, prevStates, context, prevOut, prevCoverage, t
   end
   
   if self.args.coverageSize > 0 then
-	if prevCoverage == nil then -- initialize the coverage vector as zero
-		prevCoverage = onmt.utils.Tensor.reuseTensor(self.coverageInputProto, {inputSize, context:size(2), self.args.coverageSize})
-	end
-	table.insert(inputs, prevCoverage)
+		if prevCoverage == nil then -- initialize the coverage vector as zero
+			prevCoverage = onmt.utils.Tensor.reuseTensor(self.coverageInputProto, {inputSize, context:size(2), self.args.coverageSize})
+		end
+		table.insert(inputs, prevCoverage)
   end
 
   -- Remember inputs for the backward pass.
@@ -407,10 +432,11 @@ function Decoder:forward(batch, encoderStates, context)
                                          { batch.size, self.args.rnnSize })
   if self.train then
     self.inputs = {}
+    self:initVariationalNoise(batch.size)
   end
 
   local outputs = {}
-
+  
   self:forwardAndApply(batch, encoderStates, context, function (out)
     table.insert(outputs, out)
   end)
@@ -454,7 +480,8 @@ function Decoder:backward(batch, outputs, criterion)
   for t = batch.targetLength, 1, -1 do
     -- Compute decoder output gradients.
     -- Note: This would typically be in the forward pass.
-    local pred = self.generator:forward(outputs[t])
+		--~ print(outputs[t]:norm())
+    local pred = self.generator:forward(outputs[t])  
     local output = batch:getTargetOutput(t)
 
     loss = loss + criterion:forward(pred, output)
@@ -493,7 +520,7 @@ function Decoder:backward(batch, outputs, criterion)
       gradStatesInput[i]:copy(gradInput[i])
     end
   end
-
+	
   return gradStatesInput, gradContextInput, loss
 end
 

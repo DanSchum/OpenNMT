@@ -10,7 +10,6 @@ local options = {
                                  {valid=ExtendedCmdLine.listUInt}},
   {'-fallback_to_cpu', false, [[If GPU can't be use, rollback on the CPU.]]},
   {'-fp16', false, [[To use FP16 on ]]},
-  {'-use_cudnn', false, [[Activate cudnn if necessary (Currently onmt doesn't use anything from cudnn.) ]]},
   {'-no_nccl', false, [[Disable usage of nccl in parallel mode.]]}
 }
 
@@ -35,7 +34,6 @@ function Cuda.init(opt, masterGPU)
       require('cunn')
       
       Cuda.fp16 = opt.fp16
-      Cuda.useCudnn = opt.use_cudnn
       require('cudnn')
 
       if masterGPU == nil then
@@ -43,10 +41,17 @@ function Cuda.init(opt, masterGPU)
 
         -- Validate GPU identifiers.
         for i = 1, #Cuda.gpuIds do
+          
+          local gpuName = cutorch.getDeviceProperties(i).name
+          
+          _G.logger:info('Detected GPU : ' .. gpuName)
+          
           assert(Cuda.gpuIds[i] <= cutorch.getDeviceCount(),
                  'GPU ' .. Cuda.gpuIds[i] .. ' is requested but only '
                    .. cutorch.getDeviceCount() .. ' GPUs are available')
+                   
         end
+        
 
         _G.logger:info('Using GPU(s): ' .. table.concat(Cuda.gpuIds, ', '))
       end
@@ -62,9 +67,6 @@ function Cuda.init(opt, masterGPU)
 		if opt.fallback_to_cpu then
 			_G.logger:warning('Falling back to CPU. This mode should be enabled only during testing i.e when you need a GPU to load a pretrained model, but deploy on CPU')
 			Cuda.activated = false
-		--~ else
-        --~ error(err)
-      --~ end
     end
     
     if Cuda.fp16 and Cuda.activated then
@@ -87,6 +89,8 @@ function Cuda.convert(obj)
     if Cuda.activated and obj.cuda ~= nil then
       if objtype:find('torch%..*LongTensor') then
         return obj:cudaLong()
+      elseif objtype:find('torch%..*ByteTensor') then
+        return obj:cudaByte()
       elseif Cuda.fp16 then
 				return obj:cudaHalf()
       else
