@@ -179,7 +179,7 @@ function Factory.buildWordDecoder(opt, dicts, verbose)
                                          opt.tgt_word_vec_size or opt.word_vec_size,
                                          opt.pre_word_vecs_dec, opt.fix_word_vecs_dec)
 
-	local outputSize = inputNetwork.inputSize
+	local outputSize = opt.rnn_size
   local generator = Factory.buildGenerator(outputSize, dicts)
   
   -- tieing the weights if chosen

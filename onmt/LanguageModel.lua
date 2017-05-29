@@ -13,14 +13,18 @@ local options = {
   {'-feat_vec_size', 20, [[When using sum, the common embedding size of the features]]},
   {'-residual', false, [[Add residual connections between RNN layers.]]},
   {'-brnn', false, [[Use a bidirectional encoder]]},
-  {'-brnn_merge', 'sum', [[Merge action for the bidirectional hidden states.]],
+  {'-brnn_merge', 'concat', [[Merge action for the bidirectional hidden states.]],
                      {enum={'concat','sum'}}},
   {'-pre_word_vecs_enc', '', [[If a valid path is specified, then this will load
                                      pretrained word embeddings on the encoder side.
                                      See README for specific formatting instructions.]],
                          {valid=onmt.utils.ExtendedCmdLine.fileNullOrExists}},
   {'-fix_word_vecs_enc', false, [[Fix word embeddings on the encoder side]]},
-  {'-dropout', 0.3, [[Dropout probability. Dropout is applied between vertical LSTM stacks.]]}
+  {'-dropout', 0.3, [[Dropout probability. Dropout is applied between vertical LSTM stacks.]]},
+  {'-rec_dropout', 0.3, [[Dropout probability on Recurrent connection. Only use with variational dropout]]},
+  {'-dropout_type', 'variational', [[Dropout type: naive | variational]], {enum={'variational','naive'}}},
+  {'-dropout_input', 0, [[Dropout probability on embedding (input of LSTM)]]},
+  {'-tie_embedding', false, [[Tie the embedding layer and the linear layer of the output]]}
 }
 
 function LanguageModel.declareOpts(cmd)
