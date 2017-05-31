@@ -19,6 +19,7 @@ require('onmt.modules.VDropout')
 
 -- Attention modules
 require('onmt.modules.GlobalAttention')
+require('onmt.modules.ContextGateAttention')
 
 
 require('onmt.modules.Generator')

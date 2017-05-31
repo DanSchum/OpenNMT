@@ -9,7 +9,7 @@ function EpochState:__init(epoch, startIterations, numIterations, learningRate)
   self.iterations = startIterations - 1
   self.numIterations = numIterations
   self.learningRate = learningRate
-
+	self.gradNorm = 0
   self.globalTimer = torch.Timer()
 
   self:reset()
@@ -19,7 +19,6 @@ function EpochState:reset()
   self.trainLoss = 0
   self.sourceWords = 0
   self.targetWords = 0
-
   self.timer = torch.Timer()
 end
 
@@ -29,16 +28,22 @@ function EpochState:update(model, batch, loss)
   self.trainLoss = self.trainLoss + loss
   self.sourceWords = self.sourceWords + model:getInputLabelsCount(batch)
   self.targetWords = self.targetWords + model:getOutputLabelsCount(batch)
+  
+end
+
+function EpochState:updateGradNorm(gn)
+	self.gradNorm = gn or 0
 end
 
 --[[ Log to status stdout. ]]
 function EpochState:log(iteration)
-  _G.logger:info('Epoch %d ; Iteration %d/%d ; Learning rate %.4f ; Source tokens/s %d ; Perplexity %.2f',
+  _G.logger:info('Epoch %d ; Iteration %d/%d ; Learning rate %.4f ; Source tokens/s %d ; Perplexity %.2f ; GradNorm %.4f',
                  self.epoch,
                  iteration or self.iterations, self.numIterations,
                  self.learningRate,
                  self.sourceWords / self.timer:time().real,
-                 math.exp(self.trainLoss / self.targetWords))
+                 math.exp(self.trainLoss / self.targetWords),
+                 self.gradNorm)
 
   self:reset()
 end

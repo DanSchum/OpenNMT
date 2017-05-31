@@ -104,6 +104,14 @@ function Optim:zeroGrad(gradParams)
   end
 end
 
+function Optim:getGradNorm()
+	if self.gradNorm then
+		return self.gradNorm
+	else
+		return 0
+	end
+end
+
 function Optim:prepareGrad(gradParams)
   -- Compute gradients norm.
   local gradNorm = 0
@@ -111,6 +119,8 @@ function Optim:prepareGrad(gradParams)
     gradNorm = gradNorm + gradParams[j]:norm()^2
   end
   gradNorm = math.sqrt(gradNorm)
+  -- We store the grad norm for debugging
+  self.gradNorm = gradNorm
 
   local shrinkage = self.args.max_grad_norm / gradNorm
 

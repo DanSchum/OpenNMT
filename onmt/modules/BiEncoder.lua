@@ -84,14 +84,27 @@ function BiEncoder.load(pretrained)
   local self = torch.factory('onmt.BiEncoder')()
 
   parent.__init(self)
+  
+  -- For backward compatibility
+  if #pretrained.modules == 6 and torch.typename(pretrained.modules[5]) ~= torch.typename(pretrained.modules[6]) then
+		self.fwd = onmt.Encoder.load(pretrained.modules[1])
+		self.bwd = onmt.Encoder.load(pretrained.modules[2])
+		self.wordEmb = pretrained.modules[3]
+		self.contextMerger = pretrained.modules[4]
+		self.stateMerger = pretrained.modules[5]
+		self.bridge      = pretrained.modules[6]
+  else
+		self.fwd = onmt.Encoder.load(pretrained.modules[1])
+		self.bwd = onmt.Encoder.load(pretrained.modules[2])
+		self.contextMerger = pretrained.modules[3]
+		self.stateMerger = pretrained.modules[4]
+		self.bridge      = pretrained.modules[5]
+  end
+	
 
-  self.fwd = onmt.Encoder.load(pretrained.modules[1])
-  self.bwd = onmt.Encoder.load(pretrained.modules[2])
-  self.wordEmb = pretrained.modules[3]
-  self.contextMerger = pretrained.modules[4]
-  self.stateMerger = pretrained.modules[5]
-  self.bridge      = pretrained.modules[6]
   self.args = pretrained.args
+  
+  
   
   -- backward compatibility with old models
   self.args.nDecLayers = self.args.nDecLayers or self.args.numEffectiveLayers 
@@ -108,10 +121,14 @@ function BiEncoder.load(pretrained)
 		self.args.bridge = 'copy'
 		self.bridge = self:_buildBridge()
   end
-
+  
   self:add(self.fwd)
   self:add(self.bwd)
-  self:add(self.wordEmb)
+  
+  if self.wordEmb then
+		self:add(self.wordEmb)
+  end
+  
   self:add(self.contextMerger)
   self:add(self.stateMerger)
   self:add(self.bridge)
@@ -202,6 +219,9 @@ end
 function BiEncoder:_buildBridge()
 	
 	local bridge
+	
+	self.args.bridge = self.args.bridge or 'nil'
+	
 	if self.args.bridge == 'copy' then
 		_G.logger:info(" * Identity bridge between encoder and decoder hidden states")
 		bridge = nn.MapTable(nn.Identity())
