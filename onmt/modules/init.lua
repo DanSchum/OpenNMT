@@ -42,4 +42,7 @@ require('onmt.modules.Utils.Reverse')
 require('onmt.modules.Utils.ZipTable')
 require('onmt.modules.Utils.NilModule')
 
+-- Some nn modules
+require('onmt.modules.nn.SharedLinearWeightNorm')
+
 return onmt

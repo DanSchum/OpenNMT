@@ -6,7 +6,9 @@ local options = {
                               This option impacts all options choices]],
                      {enum={'lm','seq2seq'}}},
   {'-param_init', 0.1, [[Parameters are initialized over uniform distribution with support (-param_init, param_init)]],
-                       {valid=function(v) return v >= 0 and v <= 1 end}}
+                       {valid=function(v) return v >= 0 and v <= 1 end}},
+  {'-weight_norm', false, [[Using weight normalization for linear modules]]
+                       }
 }
 
 function Model.declareOpts(cmd)
@@ -37,6 +39,24 @@ function Model:training()
   for _, m in pairs(self.models) do
     m:training()
   end
+end
+
+function Model:toWeightNorm()
+
+	_G.logger:info(' * Converting model to weight normalized modules ... *')
+	for _, m in pairs(self.models) do
+		m:replace(function(module)
+			if torch.typename(module) == 'nn.Linear' then
+				local weightNormModule = nn.SharedLinearWeightNorm.fromLinear(module)
+				onmt.utils.Cuda.convert(weightNormModule)
+				return weightNormModule
+			else
+				return module
+			end
+			
+		end)
+	end
+	_G.logger:info(' * Done')
 end
 
 -- Dynamically change parameters in the graph.
@@ -89,6 +109,10 @@ function Model:initParams(verbose)
   if verbose then
     _G.logger:info(' * number of parameters: ' .. numParams)
   end
+  
+  if self.args.weight_norm then
+		self:toWeightNorm()
+  end 
 
   return params, gradParams
 end

@@ -20,7 +20,9 @@ local options = {
                                      See README for specific formatting instructions.]],
                          {valid=onmt.utils.ExtendedCmdLine.fileNullOrExists}},
   {'-fix_word_vecs_enc', false, [[Fix word embeddings on the encoder side]]},
-  {'-dropout', 0.3, [[Dropout probability. Dropout is applied between vertical LSTM stacks.]]}
+  {'-dropout', 0.3, [[Dropout probability. Dropout is applied between vertical LSTM stacks.]]},
+  {'-dropout_type', 'variational', [[Dropout type: naive | variational]], {enum={'variational','naive'}}},
+  {'-dropout_input', 0, [[Dropout probability on embedding (input of LSTM)]]},
 }
 
 function LanguageModel.declareOpts(cmd)

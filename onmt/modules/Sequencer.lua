@@ -43,7 +43,8 @@ function Sequencer:__init(network)
 end
 
 function Sequencer:_sharedClone()
-  local clone = self.network:clone('weight', 'gradWeight', 'bias', 'gradBias')
+	
+  local clone = self.network:clone('weight', 'gradWeight', 'bias', 'gradBias', 'shared_v', 'shared_g', 'shared_gradV', 'shared_gradG', 'shared_scale', 'shared_norm')
 
   -- Manually share word embeddings if they are fixed as they are not declared as parameters.
   local wordEmb
