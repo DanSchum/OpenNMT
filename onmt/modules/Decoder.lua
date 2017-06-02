@@ -193,7 +193,7 @@ function Decoder:_buildModel()
   
   local input = embedding
   -- If set, concatenate previous decoder output.
-  if self.args.inputFeed == 2 then
+  if self.args.inputFeed == 2 and self.args.layer_norm == false then
     _G.logger:info(" * Input feeding using a GRU layer ")
     input = onmt.GRUNode(self.args.inputSize, self.args.rnnSize)({inputFeed, input})
     input = nn.Dropout(self.rnn.dropout)(input)
@@ -213,7 +213,7 @@ function Decoder:_buildModel()
   local attnLayer
   
   if self.args.coverageSize == 0 then
-		attnLayer = onmt.GlobalAttention(self.args.rnnSize, self.args.attention)
+		attnLayer = onmt.GlobalAttention(self.args.rnnSize, self.args.attention, self.args.attn_dropout)
   else
 	  attnLayer = onmt.CoverageAttention(self.args.rnnSize, self.args.coverageSize)
   end
@@ -260,10 +260,12 @@ function Decoder:_buildModel()
   end
   
   -- A final dropout layer before softmax
-  if self.args.dropout_type == 'naive' then
-		finalHidden = nn.Dropout(self.args.dropout)(finalHidden)
-	elseif self.args.dropout_type == 'variational' then
-		finalHidden = onmt.VDropout(self.args.rec_dropout, self.args.rnnSize)(finalHidden)
+  if self.args.layer_norm == false then
+		if self.args.dropout_type == 'naive' then
+			finalHidden = nn.Dropout(self.args.dropout)(finalHidden)
+		elseif self.args.dropout_type == 'variational' then
+			finalHidden = onmt.VDropout(self.args.rec_dropout, self.args.rnnSize)(finalHidden)
+		end
 	end
   
   -- We will deal with softmax layer later 
@@ -432,6 +434,12 @@ function Decoder:forward(batch, encoderStates, context)
                                          { batch.size, self.args.rnnSize })
   if self.train then
     self.inputs = {}
+    
+    -- some modules operate with the batchSize required (VDropout for example)
+    -- so we will need to update this information before forwarding
+    self:setBatchSizeBeforeForward(batch)
+    
+    -- bayesian modules will need to generate masks before training a sequence
     self:initVariationalNoise(batch.size)
   end
 
@@ -653,4 +661,12 @@ function Decoder:sampleBatch(batch, encoderStates, context, maxLength, argmax)
 	
 	sampledSeq = sampledSeq:narrow(1, 1, realMaxLength)  
 	return sampledSeq
+end
+
+function Decoder:setBatchSizeBeforeForward(batch)
+	self.network:apply(function (layer)
+      if layer.setBatchSizeBeforeForward  then
+        layer:setBatchSizeBeforeForward(batch.size * batch.sourceLength)
+      end
+    end)
 end

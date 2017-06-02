@@ -40,10 +40,16 @@ function VDropout:clone(...)
 end
 
 -- Noise initialization using Bernoulli distribution
-function VDropout:initNoise(batchSize)
+function VDropout:initNoise(bsz)
+	
+	local batchSize = self.batchSize or bsz -- only update batchSize if self.batchSize is nil (default)
 	self.noise:resize(batchSize, self.layer_size):zero()
 	self.noise:bernoulli(1-self.p)
 	self.noise:div(1-self.p)
+end
+
+function VDropout:setBatchSize(batchSize)
+	self.batchSize = batchSize
 end
 
 -- During forward pass, the noise will be generated MANUALLY using the init noise function

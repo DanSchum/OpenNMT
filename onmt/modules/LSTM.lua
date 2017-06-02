@@ -42,7 +42,7 @@ function LSTM:__init(args, inputSize, hiddenSize)
   self.numEffectiveLayers = 2 * args.layers
   self.outputSize = hiddenSize
   self.inputSize = inputSize
-  self.ln = args.ln
+  self.ln = args.layer_norm
   self.dropout_type = args.dropout_type
   self.hiddenSize = hiddenSize
   self.residual = args.residual
@@ -88,12 +88,12 @@ function LSTM:_buildModel(layers, inputSize, hiddenSize, dropout, recDropout, re
     local prevH = inputs[L*2]
     
     -- apply variational dropout on recurrent connections
-    if dropout_type == "variational" then
+    if dropout_type == "variational" and self.ln == false then
       prevH = onmt.VDropout(recDropout, hiddenSize)(prevH)
     end
     
     -- apply dropout or v.dropout on vertical connections
-    if L > 1 then
+    if L > 1 and self.ln == false then
 			if dropout_type == "variational" then
         input = onmt.VDropout(dropout, hiddenSize)(input)
       else
@@ -101,7 +101,7 @@ function LSTM:_buildModel(layers, inputSize, hiddenSize, dropout, recDropout, re
       end
     end
 
-    nextC, nextH = self:_buildLayer(inputDim, hiddenSize, ln)({prevC, prevH, input}):split(2)
+    nextC, nextH = self:_buildLayer(inputDim, hiddenSize, self.ln)({prevC, prevH, input}):split(2)
     prevInput = input
 
     table.insert(outputs, nextC)
@@ -129,6 +129,13 @@ function LSTM:_buildLayer(inputSize, hiddenSize, ln)
 
   local reshaped = nn.Reshape(4, hiddenSize)(allInputSums)
   local n1, n2, n3, n4 = nn.SplitTable(2)(reshaped):split(4)
+  
+  if ln then
+		n1 = onmt.LayerNormalization(hiddenSize)(n1)
+    n2 = onmt.LayerNormalization(hiddenSize)(n2)
+    n3 = onmt.LayerNormalization(hiddenSize)(n3)
+    n4 = onmt.LayerNormalization(hiddenSize)(n4)
+  end
 
   -- Decode the gates.
   local inGate = nn.Sigmoid()(n1)

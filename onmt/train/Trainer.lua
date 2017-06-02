@@ -212,7 +212,7 @@ function Trainer:train(model, optim, trainData, validData, dataset, info)
         
         epochState:updateGradNorm(gradNorm)
 
-        if iter % self.args.report_every == 0 then
+        if iter % self.args.report_every == 0 or iter == 1 then
           epochState:log(iter)
         end
         if self.args.save_every > 0 and iter % self.args.save_every == 0 then

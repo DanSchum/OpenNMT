@@ -34,6 +34,7 @@ require('onmt.modules.Coverage.CoverageAttention')
 
 -- Other utility modules
 require('onmt.modules.Utils.SequenceLinear')
+require('onmt.modules.Utils.SequenceModule')
 require('onmt.modules.Utils.Replicator')
 require('onmt.modules.Utils.LayerNormalization')
 require('onmt.modules.Utils.ExpandAs')

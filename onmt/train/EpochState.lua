@@ -20,6 +20,8 @@ function EpochState:reset()
   self.sourceWords = 0
   self.targetWords = 0
   self.timer = torch.Timer()
+  self.count = 0
+  self.gradNorm = 0
 end
 
 --[[ Update training status. Takes `batch` (described in data.lua) and last loss.]]
@@ -28,11 +30,12 @@ function EpochState:update(model, batch, loss)
   self.trainLoss = self.trainLoss + loss
   self.sourceWords = self.sourceWords + model:getInputLabelsCount(batch)
   self.targetWords = self.targetWords + model:getOutputLabelsCount(batch)
-  
+  self.count = self.count + 1
 end
 
 function EpochState:updateGradNorm(gn)
-	self.gradNorm = gn or 0
+	self.gradNorm = self.gradNorm or 0
+	self.gradNorm = self.gradNorm + gn
 end
 
 --[[ Log to status stdout. ]]
@@ -43,7 +46,7 @@ function EpochState:log(iteration)
                  self.learningRate,
                  self.sourceWords / self.timer:time().real,
                  math.exp(self.trainLoss / self.targetWords),
-                 self.gradNorm)
+                 self.gradNorm / self.count)
 
   self:reset()
 end

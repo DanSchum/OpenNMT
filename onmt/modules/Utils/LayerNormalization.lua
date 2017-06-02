@@ -1,55 +1,29 @@
-local LayerNormalization, parent = torch.class('onmt.LayerNormalization','onmt.Network')
+-- Reference: https://arxiv.org/pdf/1607.06450.pdf (Section 3)
 
+local LayerNormalization, parent = torch.class('onmt.LayerNormalization', 'nn.Sequential')
+function LayerNormalization:__init(nOutput, bias, eps, affine)
+  parent.__init(self)
+  eps = eps or 1e-10
+  affine = (affine == nil) and true or affine
+  bias = bias or 0
 
-function LayerNormalization:__init(dim, biasInit, eps, affine)
-	
-	self.dim = dim
-	self.biasInit = biasInit or nil
-	self.affine = affine or true
-	self.eps = eps or 1e-5
-	parent.__init(self, self:_buildModel(self.dim, self.eps, self.affine))
-end
+  self:add(nn.ConcatTable()
+               :add(nn.Identity())
+               :add(nn.Sequential()
+                       :add(nn.Mean(2))
+                       :add(nn.Replicate(nOutput,2))))
+      :add(nn.CSubTable())
+      :add(nn.Normalize(2, eps))
+      :add(nn.MulConstant(torch.sqrt(nOutput)))
 
---build the nn Graph. 
-function LayerNormalization:_buildModel(dim, eps, affine)
-	
-	local input = nn.Identity()()
-	
-	local mean = nn.Mean(2)(input)
-	
-	local mean_rep = nn.Replicate(dim, 2)(mean)
-	
-	local input_center = nn.CSubTable()({input, mean_rep})
-	
-	local std = nn.Sqrt()(nn.Mean(2)(nn.Square()(input_center)))
-	
-	local std_rep = nn.AddConstant(eps)(nn.Replicate(dim,2)(std))
-	
-	local output = nn.CDivTable()({input_center, std_rep})
-	
-	if affine == true then
-		
-		local biasTransform = nn.Add(dim, false)
-		self.biasTransform = biasTransform
-		
-		local gainTransform = nn.CMul(dim)
-		self.gainTransform = gainTransform
-		
-		output = biasTransform(gainTransform(output))
-	end
-	
-	return nn.gModule({input},{output})
-
-end
-
-function LayerNormalization:postParametersInitialization()
-  
-  if self.affine == true then
-	
-	if self.biasInit ~= nil then
-		self.biasTransform.bias:fill(self.biasInit)
-	end
-	
-	self.gainTransform.weight:fill(1.)
+  if affine then
+    local biasTransform = nn.Add(nOutput, false)
+    biasTransform.bias:fill(bias)
+    biasTransform.postParametersInitialization = function(m) m.bias:fill(bias) end
+    local gainTransform = nn.CMul(nOutput)
+    gainTransform.weight:fill(1.)
+    gainTransform.postParametersInitialization = function(m) m.weight:fill(1.) end
+    self:add(gainTransform)
+    self:add(biasTransform)
   end
 end

@@ -28,18 +28,24 @@ local GlobalAttention, parent = torch.class('onmt.GlobalAttention', 'onmt.Networ
 
   * `dim` - dimension of the context vectors.
 --]]
-function GlobalAttention:__init(dim, attType)
+function GlobalAttention:__init(dim, attType, dropout)
 	self.attType = attType
 	self.contextGate = contextGate
-  parent.__init(self, self:_buildModel(dim, attType))
+  parent.__init(self, self:_buildModel(dim, attType, dropout))
 end
 
-function GlobalAttention:_buildModel(dim, attType)
+function GlobalAttention:_buildModel(dim, attType, dropout)
   local inputs = {}
   table.insert(inputs, nn.Identity()())
   table.insert(inputs, nn.Identity()())
 	
-  local targetT = nn.Linear(dim, dim, false)(inputs[1]) -- batchL x dim
+	local targetT
+	if dropout then
+		targetT = onmt.VDropout(dropout, dim)(inputs[1])
+	else
+		targetT = nn.Identity(inputs[1])
+	end
+  local targetT = nn.Linear(dim, dim, false)(targetT) -- batchL x dim
   local context = inputs[2] -- batchL x sourceTimesteps x dim
   
 
@@ -54,7 +60,10 @@ function GlobalAttention:_buildModel(dim, attType)
 		attn = softmaxAttn(attn)
 		attn = nn.Replicate(1,2)(attn) -- batchL x 1 x sourceL
   elseif attType == 'mlp' then
-		_G.logger:info(" * Using MLP type attention")
+		_G.logger:info(" * Using MLP type attention ")
+		if dropout then
+			context = onmt.SequenceModule(onmt.VDropout(dropout, dim))(context)
+		end
 		local transformedContext = onmt.SequenceLinear(dim, dim, false)(context)
 		local transformedHidden = nn.Replicate(1, 2)(targetT)
 		local expands = nn.ExpandAs()({transformedContext, transformedHidden})
