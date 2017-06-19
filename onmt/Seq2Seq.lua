@@ -45,7 +45,7 @@ local options = {
   {'-dropout', 0.3, [[Dropout probability. Dropout is applied between vertical LSTM stacks.]]},
   {'-rec_dropout', 0.3, [[Dropout probability on Recurrent connection. Only use with variational dropout]]},
   {'-attn_dropout', 0, [[Dropout probability on the MLP attention layer]]},
-  {'-dropout_type', 'variational', [[Dropout type: naive | variational]], {enum={'variational','naive'}}},
+  {'-dropout_type', 'naive', [[Dropout type: naive | variational]], {enum={'variational','naive'}}},
   {'-dropout_input', 0, [[Dropout probability on embedding (input of LSTM)]]},
   {'-layer_norm', false, [[Use layer normalization for LSTM]]},
   {'-tie_embedding', false, [[Tie the embedding layer and the linear layer of the output]]}

@@ -40,10 +40,10 @@ function GlobalAttention:_buildModel(dim, attType, dropout)
   table.insert(inputs, nn.Identity()())
 	
 	local targetT
-	if dropout then
+	if dropout and dropout > 0 then
 		targetT = onmt.VDropout(dropout, dim)(inputs[1])
 	else
-		targetT = nn.Identity(inputs[1])
+		targetT = nn.Identity()(inputs[1])
 	end
   local targetT = nn.Linear(dim, dim, false)(targetT) -- batchL x dim
   local context = inputs[2] -- batchL x sourceTimesteps x dim
@@ -61,7 +61,7 @@ function GlobalAttention:_buildModel(dim, attType, dropout)
 		attn = nn.Replicate(1,2)(attn) -- batchL x 1 x sourceL
   elseif attType == 'mlp' then
 		_G.logger:info(" * Using MLP type attention ")
-		if dropout then
+		if dropout and dropout > 0 then
 			context = onmt.SequenceModule(onmt.VDropout(dropout, dim))(context)
 		end
 		local transformedContext = onmt.SequenceLinear(dim, dim, false)(context)
@@ -74,6 +74,26 @@ function GlobalAttention:_buildModel(dim, attType, dropout)
 		-- second layer of that network
 		local score_ht_hs = onmt.SequenceLinear(dim, 1)(tanhSum)
 		
+		attn = nn.Sum(3)(score_ht_hs)
+		local softmaxAttn = nn.SoftMax()
+		softmaxAttn.name = 'softmaxAttn'
+		attn = softmaxAttn(attn)
+		alignmentVector = attn
+		attn = nn.Replicate(1,2)(attn)
+	elseif attType == 'cbp' then
+		_G.logger:info(" * Using compact bilinear pooling attention ")
+		local module = nn.Sequential():add(nn.CompactBilinearPooling(1000))
+		--~ local module = nn.Sequential():add(nn.CAddTable())
+		module:add(nn.Linear(1000, 1))
+		module:add(nn.Contiguous())
+		
+		local expands = nn.ExpandAs()({context, nn.Replicate(1, 2)(targetT)})
+		
+		
+		local inputCBP = expands
+		
+		local cbpOutput = onmt.SequenceModule(module, 2, 1)(inputCBP)
+		local score_ht_hs = cbpOutput
 		attn = nn.Sum(3)(score_ht_hs)
 		local softmaxAttn = nn.SoftMax()
 		softmaxAttn.name = 'softmaxAttn'

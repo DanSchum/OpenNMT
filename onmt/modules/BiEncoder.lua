@@ -85,8 +85,21 @@ function BiEncoder.load(pretrained)
 
   parent.__init(self)
   
+  --~ print(#pretrained.modules)
+  local function compare(module1, module2)
+		
+		if module1.modules and module2.modules then
+			if #module1.modules == #module2.modules then
+				return true
+			end
+		end
+		
+		return false
+  end
+  
   -- For backward compatibility
-  if #pretrained.modules == 6 and torch.typename(pretrained.modules[5]) ~= torch.typename(pretrained.modules[6]) then
+  --~ if #pretrained.modules == 6 and (torch.typename(pretrained.modules[5]) ~= torch.typename(pretrained.modules[6])) then
+  if #pretrained.modules == 6 and compare(pretrained.modules[5],pretrained.modules[6]) == false then
 		self.fwd = onmt.Encoder.load(pretrained.modules[1])
 		self.bwd = onmt.Encoder.load(pretrained.modules[2])
 		self.wordEmb = pretrained.modules[3]
